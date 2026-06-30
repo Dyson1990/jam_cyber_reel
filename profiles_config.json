@@ -1,0 +1,159 @@
+{
+  "current_profile": "movie",
+  "profiles": {
+    "movie": {
+      "name": "电影",
+      "root": "\\\\TRUENAS\\rust_bytes：电影",
+      "naming_rules": {
+        "当幸福来敲门.The_Pursuit_of_Happyness.2006.BluRay.1080p.x265.10bit.无字幕.mkv": "当幸福来敲门1111.The_Pursuit_of_Happyness.2006.BluRay.1080p.x265.10bit.无字幕.mkv"
+      },
+      "extra_config": {},
+      "screenshot_config": {
+        "count": 3,
+        "times": []
+      },
+      "table_schema": [
+        {
+          "name": "director",
+          "type": "TEXT",
+          "label": "导演"
+        },
+        {
+          "name": "year",
+          "type": "INTEGER",
+          "label": "年份"
+        },
+        {
+          "name": "file_size",
+          "type": "INTEGER",
+          "label": "文件大小"
+        },
+        {
+          "name": "duration",
+          "type": "REAL",
+          "label": "时长"
+        },
+        {
+          "name": "codec",
+          "type": "TEXT",
+          "label": "编码"
+        },
+        {
+          "name": "resolution",
+          "type": "TEXT",
+          "label": "分辨率"
+        }
+      ],
+      "new_root": "\\\\TRUENAS\\rust_bytes：电影\\new",
+      "from": "\\\\TRUENAS\\rust_bytes：电影\\new",
+      "to": "\\\\TRUENAS\\rust_bytes：电影\\standardized"
+    },
+    "tv": {
+      "name": "电视剧",
+      "root": "\\\\TRUENAS\\rust_bytes：美剧",
+      "naming_rules": {},
+      "extra_config": {},
+      "screenshot_config": {
+        "count": 3,
+        "times": []
+      },
+      "table_schema": [
+        {
+          "name": "series",
+          "type": "TEXT",
+          "label": "系列"
+        },
+        {
+          "name": "year",
+          "type": "INTEGER",
+          "label": "年份"
+        },
+        {
+          "name": "file_size",
+          "type": "INTEGER",
+          "label": "文件大小"
+        },
+        {
+          "name": "duration",
+          "type": "REAL",
+          "label": "时长"
+        },
+        {
+          "name": "codec",
+          "type": "TEXT",
+          "label": "编码"
+        },
+        {
+          "name": "resolution",
+          "type": "TEXT",
+          "label": "分辨率"
+        }
+      ],
+      "new_root": "\\\\TRUENAS\\rust_bytes：电影\\new",
+      "from": "",
+      "to": ""
+    },
+    "realshot": {
+      "name": "实拍",
+      "root": "",
+      "naming_rules": {},
+      "extra_config": {},
+      "screenshot_config": {
+        "count": 2,
+        "times": []
+      },
+      "table_schema": [
+        {
+          "name": "file_size",
+          "type": "INTEGER",
+          "label": "文件大小"
+        },
+        {
+          "name": "duration",
+          "type": "REAL",
+          "label": "时长"
+        },
+        {
+          "name": "codec",
+          "type": "TEXT",
+          "label": "编码"
+        },
+        {
+          "name": "resolution",
+          "type": "TEXT",
+          "label": "分辨率"
+        }
+      ]
+    },
+    "homework": {
+      "name": "Homework",
+      "root": "",
+      "naming_rules": {
+        "pattern": "^(.*?)[\\-_\\.\\s]+(.*)$",
+        "replacement": "\\1 - \\2"
+      },
+      "extra_config": {},
+      "screenshot_config": {
+        "count": 2,
+        "times": []
+      },
+      "table_schema": [
+        {
+          "name": "series",
+          "type": "TEXT",
+          "label": "课程编号"
+        },
+        {
+          "name": "file_size",
+          "type": "INTEGER",
+          "label": "文件大小"
+        },
+        {
+          "name": "duration",
+          "type": "REAL",
+          "label": "时长"
+        }
+      ]
+    }
+  }
+}

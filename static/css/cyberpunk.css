@@ -1,0 +1,160 @@
+/*
+ * CyberReel — 赛博朋克风主题样式
+ *
+ * 设计思路：
+ *   暗色背景 + 霓虹色（青/品红/黄）边框与文字，
+ *   营造赛博朋克视觉风格。使用 CSS 变量统一管理颜色，
+ *   配合 NiceGUI 的 Tailwind 类使用。
+ *
+ * 颜色体系：
+ *   --neon-cyan:    #00f0ff  主色调（边框、强调文字）
+ *   --neon-magenta: #ff00ff  次色调（Profile、高亮）
+ *   --neon-yellow:  #ffff00  数据高亮
+ *   --bg-dark:      #0a0a0f  最深背景
+ *   --bg-card:      #111118  卡片背景
+ */
+
+:root {
+    --neon-cyan: #00f0ff;
+    --neon-magenta: #ff00ff;
+    --neon-yellow: #ffff00;
+    --neon-green: #00ff41;
+    --bg-dark: #0a0a0f;
+    --bg-card: #111118;
+    --border-dim: #1a3a3a;
+}
+
+/* 全局基础 */
+body {
+    background-color: var(--bg-dark);
+    color: #c0c0c0;
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+
+/* NiceGUI 暗色模式增强 */
+.dark body,
+body.dark {
+    background-color: var(--bg-dark) !important;
+}
+
+/* 霓虹发光文字 */
+.glow-text {
+    text-shadow: 0 0 8px var(--neon-cyan), 0 0 16px var(--neon-cyan);
+}
+
+/* 卡片发光边框效果 */
+.border-neon {
+    border-color: var(--neon-cyan) !important;
+    box-shadow: 0 0 6px rgba(0, 240, 255, 0.2), inset 0 0 6px rgba(0, 240, 255, 0.05);
+}
+
+/* 菜单按钮悬停动画 */
+.hover-neon:hover {
+    border-color: var(--neon-cyan) !important;
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+    transition: all 0.2s ease;
+}
+
+/* 滚动条 — 赛博朋克风格 */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-dark);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--neon-cyan);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--neon-magenta);
+}
+
+/* NiceGUI 抽屉优化 */
+.q-drawer {
+    background-color: #08080d !important;
+    border-right: 1px solid var(--border-dim) !important;
+}
+
+/* NiceGUI 头部栏 */
+.q-header {
+    background-color: #0d0d15 !important;
+    border-bottom: 1px solid var(--border-dim) !important;
+}
+
+/* 输入框赛博风格 */
+input.cyber-input,
+textarea.cyber-input {
+    background-color: #111118 !important;
+    border: 1px solid var(--border-dim) !important;
+    color: var(--neon-cyan) !important;
+    font-family: 'Consolas', monospace !important;
+}
+input.cyber-input:focus,
+textarea.cyber-input:focus {
+    border-color: var(--neon-cyan) !important;
+    box-shadow: 0 0 6px rgba(0, 240, 255, 0.3);
+    outline: none;
+}
+
+/* 选择框赛博风格 */
+select.cyber-select {
+    background-color: #111118 !important;
+    border: 1px solid var(--border-dim) !important;
+    color: var(--neon-cyan) !important;
+}
+
+/* 按钮通用动效 */
+button.cyber-btn {
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+button.cyber-btn:hover {
+    filter: brightness(1.2);
+}
+
+/* 展开面板（Expansion）赛博风格 */
+.q-expansion-item {
+    border: 1px solid var(--border-dim);
+    border-radius: 4px;
+    margin-bottom: 4px;
+    background-color: var(--bg-card);
+}
+.q-expansion-item:hover {
+    border-color: var(--neon-cyan);
+}
+
+/* 表格行交替色 */
+.cyber-row:nth-child(even) {
+    background-color: rgba(0, 240, 255, 0.03);
+}
+
+/* 通知样式覆盖 */
+.q-notification {
+    background-color: var(--bg-card) !important;
+    border: 1px solid var(--neon-cyan) !important;
+    color: var(--neon-cyan) !important;
+}
+
+/* 分隔线 */
+.cyber-divider {
+    border-color: var(--border-dim) !important;
+}
+
+/* 标签通用 */
+.cyber-label {
+    font-family: 'Consolas', monospace;
+    color: var(--neon-cyan);
+}
+
+/* magenta 文字（NiceGUI 不内置此色） */
+.text-magenta-400 {
+    color: var(--neon-magenta) !important;
+}
+
+/* 预加载字体抗锯齿 */
+* {
+    -webkit-font-smoothing: antialiased;
+}
