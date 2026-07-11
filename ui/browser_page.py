@@ -23,6 +23,18 @@ from pathlib import Path
 from nicegui import ui
 
 
+def _load_covers(total: int, render_fn):
+    """更新状态栏并加载封面。"""
+    from ui.state import status_text, status_progress
+    status_text.set_text(f"加载封面: 0/{total}")
+    if status_progress:
+        status_progress.set_value(0)
+    render_fn(with_covers=True)
+    status_text.set_text("就绪")
+    if status_progress:
+        status_progress.set_value(0)
+
+
 def _get_exclude_dirs(root: str, *sub_paths: str) -> list[str]:
     """若 sub_path 在 root 下，返回其相对路径首段作为排除目录前缀。"""
     if not root:
@@ -91,7 +103,7 @@ def build_browser(config_mgr, db):
         with ui.row().classes("w-full items-center gap-4 mb-4"):
             ui.label(f"共 {len(records)} 条记录").classes(
                 "text-sm text-gray-400 font-mono")
-            ui.button("📷 加载封面", on_click=lambda: render_table(with_covers=True)).classes(
+            ui.button("📷 加载封面", on_click=lambda: _load_covers(len(records), render_table)).classes(
                 "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono text-sm "
                 "border border-cyan-600 rounded px-4 py-1")
 

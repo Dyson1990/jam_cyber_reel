@@ -32,6 +32,7 @@ content_area: ui.column = None
 profile_label: ui.label = None
 root_label: ui.label = None
 status_text: ui.label = None
+status_progress: ui.linear_progress = None
 
 # 全局核心实例引用
 config_mgr = None
@@ -69,6 +70,8 @@ def switch_page(page: str):
             build_tools(config_mgr, db_instance)
 
     status_text.set_text("就绪") if status_text else None
+    if status_progress:
+        status_progress.set_value(0)
 
 
 def update_drawer_info():
@@ -80,3 +83,5 @@ def update_drawer_info():
         root_label.set_text(root)
 
     status_text.set_text("就绪") if status_text else None
+    if status_progress:
+        status_progress.set_value(0)

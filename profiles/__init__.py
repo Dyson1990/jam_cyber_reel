@@ -31,6 +31,7 @@ Profile 插件架构说明：
 """
 
 import importlib
+import os
 import re
 import uuid
 from abc import ABC
@@ -95,11 +96,11 @@ class ProfileBase(ABC):
             return []
 
         # 构建排除路径集合
-        exclude_paths: set[Path] = set()
+        exclude_prefixes: list[str] = []
         if exclude_dirs:
             for d in exclude_dirs:
-                p = (root_path / d).resolve()
-                exclude_paths.add(p)
+                p = os.path.normpath(str(root_path / d)).lower()
+                exclude_prefixes.append(p)
 
         seen: set[str] = set()
         files: list[Path] = []
@@ -108,16 +109,13 @@ class ProfileBase(ABC):
                 continue
             if f.is_dir():
                 continue
-            # 跳过排除目录下的文件
-            resolved = f.resolve()
-            if exclude_paths:
-                if any(
-                    str(resolved).startswith(str(ep)) for ep in exclude_paths
-                ):
+            # 跳过排除目录下的文件（用 normpath 纯字符串比较，不访问文件系统）
+            f_norm = os.path.normpath(str(f)).lower()
+            if exclude_prefixes:
+                if any(f_norm.startswith(ep) for ep in exclude_prefixes):
                     continue
-            key = str(resolved)
-            if key not in seen:
-                seen.add(key)
+            if f_norm not in seen:
+                seen.add(f_norm)
                 files.append(f)
         return files
 
@@ -359,7 +357,7 @@ class ProfileBase(ABC):
             return {"added": [], "removed": [], "existing": 0}
 
         disk_files = self.scan(exclude_dirs=exclude_dirs)
-        disk_set: set[str] = {str(f.resolve()) for f in disk_files}
+        disk_set: set[str] = {os.path.normpath(str(f)) for f in disk_files}
 
         db_records = self.db.get_media_by_profile(self.profile_name)
         db_set: set[str] = {r["mv_path"] for r in db_records}
@@ -531,34 +529,44 @@ def _resolve_time_points(
 
 
 def _extract_frame_pyav(video: Path, time_sec: float) -> Optional[bytes]:
-    """使用 PyAV 从视频指定时间点提取一帧，返回 PNG 字节。
-
-    Args:
-        video: 视频文件路径
-        time_sec: 时间点（秒）
-
-    Returns:
-        PNG 字节数据或 None
-    """
+    """使用 PyAV 从视频指定时间点提取一帧，返回 PNG 字节。"""
     import av
     import io
 
     try:
         container = av.open(str(video))
-        stream = container.streams.video[0]
+    except Exception:
+        return None
 
-        # seek 偏移量使用 stream 的 time_base
+    try:
+        stream = container.streams.video[0]
+        if stream.duration is None and stream.frames == 0:
+            container.close()
+            return None
+
         seek_pts = int(time_sec / stream.time_base)
+        # 确保 seek 目标不超过流末尾
+        if stream.duration:
+            max_pts = stream.duration - 1
+            seek_pts = min(seek_pts, max_pts)
         container.seek(seek_pts, stream=stream)
 
         for frame in container.decode(stream):
-            img = frame.to_image()  # PIL Image
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            container.close()
-            return buf.getvalue()
+            try:
+                img = frame.to_image()
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                container.close()
+                return buf.getvalue()
+            except Exception:
+                continue
     except Exception:
         pass
+    finally:
+        try:
+            container.close()
+        except Exception:
+            pass
     return None
 
 

@@ -276,7 +276,7 @@ async def _run_capture_screenshots(handler, log_container):
     每个视频单独调用 asyncio.to_thread，文件之间更新 UI 日志。
     线程与主程序生命周期绑定：主程序退出时守护线程自动终止。
     """
-    from ui.state import status_text
+    from ui.state import status_text, status_progress
 
     log_container.clear()
     _log(log_container, "◆ 开始截图采集...", "cyan")
@@ -291,14 +291,33 @@ async def _run_capture_screenshots(handler, log_container):
         _log(log_container, "  无媒体记录", "yellow")
         return
 
-    _log(log_container, f"  共 {len(records)} 条媒体记录", "gray")
+    # 预过滤：跳过已有足够截图的视频，避免浪费时间
+    pending: list = []
+    skipped = 0
+    for rec in records:
+        existing = handler.db.get_screenshot_count(rec["mv_path"])
+        if existing >= count:
+            skipped += 1
+        else:
+            pending.append(rec)
+
+    _log(log_container, f"  共 {len(records)} 条媒体记录，已有截图达标 {skipped} 个，待处理 {len(pending)} 个", "gray")
+
+    if not pending:
+        _log(log_container, "  全部视频截图已达标，无需处理 ✓", "green")
+        status_text.set_text("就绪")
+        if status_progress:
+            status_progress.set_value(0)
+        return
 
     total = 0
-    for rec in records:
+    for i, rec in enumerate(pending):
         mv_path = rec["mv_path"]
         name = Path(mv_path).name
         _log(log_container, f"  截取中: {name}...", "cyan")
         status_text.set_text(f"截图采集: {name}")
+        if status_progress:
+            status_progress.set_value((i + 1) / len(pending))
 
         try:
             result = await asyncio.to_thread(
@@ -314,6 +333,8 @@ async def _run_capture_screenshots(handler, log_container):
         _log(log_container, f"  {name}: {result.get('status', '?')}", color)
 
     status_text.set_text("就绪")
+    if status_progress:
+        status_progress.set_value(0)
     _log(log_container, f"◆ 截图采集完成: 共 {total} 张 ✓", "cyan")
 
 

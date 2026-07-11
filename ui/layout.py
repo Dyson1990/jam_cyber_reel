@@ -89,6 +89,8 @@ def create_layout(cfg_mgr, db, prof_registry):
                 state.status_text = ui.label("就绪").classes(
                     "text-sm text-cyan-200 font-mono mt-1"
                 )
+                state.status_progress = ui.linear_progress(0).classes("mt-2")
+                state.status_progress.style("height:4px;")
 
             ui.separator().classes("my-2 border-cyan-900")
 
