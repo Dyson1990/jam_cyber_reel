@@ -5,7 +5,7 @@ from pathlib import Path
 from nicegui import ui
 
 from config_manager import ConfigManager
-from db import Database
+from core.db import Database
 from profiles import ProfileRegistry
 from ui.layout import create_layout
 

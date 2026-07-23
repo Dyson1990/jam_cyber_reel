@@ -6,7 +6,7 @@
     所有测试数据均由 Python 本地随机生成（random / uuid / Pillow）。
 
 与其它模块的关系：
-    - 使用 db.py 的 Database 类操作数据库
+    - 使用 core/db.py 的 Database 类操作数据库
     - 独立运行，不依赖 UI 或其他模块
     - 仅需执行一次，后续 main.py 可直接使用已有 data.db
 
@@ -27,7 +27,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from db import Database
+from core.db import Database
 from config_manager import ConfigManager
 
 # 项目根目录（脚本所在目录）

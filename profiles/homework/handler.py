@@ -8,7 +8,8 @@ naming_rules 格式：{"pattern": "...", "replacement": "..."}
 import re
 from pathlib import Path
 
-from profiles import ProfileBase, VIDEO_EXTENSIONS
+from profiles import ProfileBase
+from core.files import VIDEO_EXTENSIONS
 
 
 class HomeworkHandler(ProfileBase):

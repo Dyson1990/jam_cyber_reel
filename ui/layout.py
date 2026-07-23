@@ -87,10 +87,17 @@ def create_layout(cfg_mgr, db, prof_registry):
             with ui.card().classes("bg-gray-800 border border-cyan-900 rounded p-2 w-full"):
                 ui.label("STATUS").classes("text-xs text-gray-500 font-mono")
                 state.status_text = ui.label("就绪").classes(
-                    "text-sm text-cyan-200 font-mono mt-1"
+                    "text-xs text-cyan-300 font-mono mt-1"
                 )
-                state.status_progress = ui.linear_progress(0).classes("mt-2")
-                state.status_progress.style("height:4px;")
+                state.status_progress = ui.linear_progress(0, show_value=False).classes("mt-2")
+                state.status_progress.style("height:8px;")
+                ui.button(
+                    "■ 停止",
+                    on_click=lambda: state.request_cancel(),
+                ).classes(
+                    "w-full mt-2 bg-red-900 hover:bg-red-700 text-red-300 font-mono "
+                    "border border-red-600 rounded text-xs py-1"
+                )
 
             ui.separator().classes("my-2 border-cyan-900")
 

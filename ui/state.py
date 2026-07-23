@@ -23,7 +23,27 @@ UI 共享状态模块 - 保存全局引用，打破循环导入。
     update_drawer_info()    - 更新左侧菜单信息
 """
 
+import threading
+
 from nicegui import ui
+
+# 取消标记：停止按钮设置此事件，各运行函数检查后中断
+_cancel_event = threading.Event()
+
+
+def cancel_requested() -> bool:
+    """检查是否请求取消（不清除标记）。"""
+    return _cancel_event.is_set()
+
+
+def request_cancel():
+    """设置取消标记（停止按钮回调）。"""
+    _cancel_event.set()
+
+
+def clear_cancel():
+    """清除取消标记（运行开始时调用）。"""
+    _cancel_event.clear()
 
 # 页面模块延迟到 switch_page 内导入以打破循环引用
 
