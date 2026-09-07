@@ -24,23 +24,23 @@ def cipher(text: str, key: int, encrypt: bool = True) -> str:
         'punct': tuple(range(0x3000, 0x303F + 1)) + tuple(range(0x2000, 0x206F + 1)) + tuple(range(0xFF00, 0xFFEF + 1)),
     }
 
-    # 首次调用时缓存 {字符: 所属范围} 查找表
+    # 首次调用时缓存 {字符: (所属范围, 范围内下标)}，避免每次 O(n) 线性查找
     if not hasattr(cipher, '_CHAR_MAP'):
         cipher._CHAR_MAP = {}
         for rng in RANGES.values():
-            for cp in rng:
-                cipher._CHAR_MAP[chr(cp)] = rng
+            for idx, cp in enumerate(rng):
+                cipher._CHAR_MAP[chr(cp)] = (rng, idx)
 
     char_map = cipher._CHAR_MAP
     k = key if encrypt else -key
     result = []
 
     for ch in text:
-        rng = char_map.get(ch)
-        if rng is None:
+        item = char_map.get(ch)
+        if item is None:
             result.append(ch)  # 不在范围内的字符原样保留
         else:
-            idx = rng.index(ord(ch))  # 找到当前字符在范围内的位置
+            rng, idx = item
             result.append(chr(rng[(idx + k) % len(rng)]))
 
     return ''.join(result)

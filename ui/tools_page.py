@@ -12,7 +12,7 @@
     build_tools(config_mgr, db) - 构建工具页 UI
 """
 
-from nicegui import ui
+from nicegui import run, ui
 
 from core.common.tools import list_scripts, run_script
 from ui.state import tag
@@ -144,10 +144,11 @@ def _select_script(script_path, selected, source_area, args_input, output_area):
     output_area.set_value("")
 
 
-def _run_script(script_path, config_mgr, args_input, output_area):
-    """运行选中的脚本，结果委托 core.common.tools.run_script。"""
+async def _run_script(script_path, config_mgr, args_input, output_area):
+    """运行选中的脚本（后台线程，避免阻塞事件循环）。"""
     output_area.set_value("运行中...")
-    output_area.set_value(run_script(script_path, config_mgr, args_input.value))
+    result = await run.io_bound(run_script, script_path, config_mgr, args_input.value)
+    output_area.set_value(result)
 
 
 async def _copy_output(output_area):

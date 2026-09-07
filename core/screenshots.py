@@ -9,11 +9,11 @@
 
 公开函数（需 DB）:
     capture_one_video(db, mv_path, profile_name, count, moments) -> dict
-    capture_screenshots(db, profile_name, config) -> list[dict]
 """
 
 import io
 import random
+import threading
 import time as _time
 from pathlib import Path
 from typing import Callable, Optional
@@ -41,7 +41,6 @@ def resolve_time_points(
         ([时间点列表], 视频时长秒数)
     """
     import av
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
     if moments is None:
         moments = []
@@ -63,23 +62,29 @@ def resolve_time_points(
         fallback = [5.0, 30.0, 120.0, 600.0, 1800.0]
         return fallback[:count], dur
 
-    try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_do_probe)
-            # 每 0.5s 轮询，支持取消
-            deadline = _time.monotonic() + timeout
-            while True:
-                remain = deadline - _time.monotonic()
-                if remain <= 0:
-                    raise FutureTimeout
-                try:
-                    return future.result(timeout=min(0.5, remain))
-                except FutureTimeout:
-                    if cancel_fn and cancel_fn():
-                        future.cancel()
-                        return ([], 0.0)
-    except FutureTimeout:
-        raise TimeoutError(f"av.open 超时（>{timeout}s）")
+    # 用守护线程 + 轮询：超时/取消后不 join，避免挂死的 av.open 阻塞主流程
+    box: dict = {}
+
+    def _worker():
+        try:
+            box["value"] = _do_probe()
+        except Exception as e:
+            box["error"] = e
+
+    threading.Thread(target=_worker, daemon=True).start()
+    deadline = _time.monotonic() + timeout
+    while True:
+        if "value" in box or "error" in box:
+            break
+        if cancel_fn and cancel_fn():
+            return ([], 0.0)
+        if _time.monotonic() >= deadline:
+            raise TimeoutError(f"av.open 超时（>{timeout}s）")
+        _time.sleep(0.5)
+
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
 
 
 def _frame_to_png(frame) -> Optional[bytes]:
@@ -153,7 +158,6 @@ def extract_frame(
 ) -> Optional[bytes]:
     """从视频指定秒数提取一帧 PNG 字节。失败/超时返回 None。"""
     import av
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
     def _do_extract() -> Optional[bytes]:
         try:
@@ -199,22 +203,22 @@ def extract_frame(
                 pass
         return None
 
-    try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_do_extract)
-            deadline = _time.monotonic() + timeout
-            while True:
-                remain = deadline - _time.monotonic()
-                if remain <= 0:
-                    return None
-                try:
-                    return future.result(timeout=min(0.5, remain))
-                except FutureTimeout:
-                    if cancel_fn and cancel_fn():
-                        future.cancel()
-                        return None
-    except FutureTimeout:
-        return None
+    # 守护线程 + 轮询：超时/取消后不 join，避免挂死的 decode 阻塞主流程
+    box: dict = {}
+
+    def _worker():
+        box["value"] = _do_extract()
+
+    threading.Thread(target=_worker, daemon=True).start()
+    deadline = _time.monotonic() + timeout
+    while True:
+        if "value" in box:
+            return box["value"]
+        if cancel_fn and cancel_fn():
+            return None
+        if _time.monotonic() >= deadline:
+            return None
+        _time.sleep(0.5)
 
 
 def extract_frames(
@@ -348,20 +352,3 @@ def capture_one_video(
         result["status"] = f"截取 {captured}/{len(time_points)} 张"
 
     return result
-
-
-def capture_screenshots(db, profile_name: str, config: dict) -> list[dict]:
-    """对 Profile 所有媒体记录截取视频帧。"""
-    ss_cfg = config.get("screenshot_config", {})
-    count = ss_cfg.get("count", 3)
-    moments = ss_cfg.get("moments", [])
-
-    records = db.get_media_by_profile(profile_name)
-    if not records:
-        return [{"status": "无媒体记录"}]
-
-    results: list[dict] = []
-    for rec in records:
-        r = capture_one_video(db, rec["mv_path"], profile_name, count, moments)
-        results.append(r)
-    return results

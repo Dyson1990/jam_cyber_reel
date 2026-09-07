@@ -10,7 +10,7 @@
       "extra_config": {},
       "screenshot_config": {
         "count": 3,
-        "times": []
+        "moments": []
       },
       "table_schema": [
         {
@@ -44,7 +44,6 @@
           "label": "分辨率"
         }
       ],
-      "new_root": "\\\\TRUENAS\\rust_bytes：电影\\new",
       "from": "\\\\TRUENAS\\rust_bytes：电影\\new",
       "to": "\\\\TRUENAS\\rust_bytes：电影\\standardized"
     },
@@ -55,7 +54,7 @@
       "extra_config": {},
       "screenshot_config": {
         "count": 3,
-        "times": []
+        "moments": []
       },
       "table_schema": [
         {
@@ -89,7 +88,6 @@
           "label": "分辨率"
         }
       ],
-      "new_root": "\\\\TRUENAS\\rust_bytes：电影\\new",
       "from": "",
       "to": ""
     },
@@ -100,7 +98,7 @@
       "extra_config": {},
       "screenshot_config": {
         "count": 2,
-        "times": []
+        "moments": []
       },
       "table_schema": [
         {
@@ -135,7 +133,7 @@
       "extra_config": {},
       "screenshot_config": {
         "count": 2,
-        "times": []
+        "moments": []
       },
       "table_schema": [
         {

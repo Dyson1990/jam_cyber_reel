@@ -91,10 +91,11 @@ class ProfileBase:
 
     def sync_db(
         self, exclude_dirs: Optional[list[str]] = None, crid_pattern: str = "",
+        added: Optional[list] = None,
     ) -> int:
         return _sync_db(
             self.config.get("root", ""), self.db, self.profile_name,
-            exclude_dirs=exclude_dirs, crid_pattern=crid_pattern,
+            exclude_dirs=exclude_dirs, crid_pattern=crid_pattern, added=added,
         )
 
 

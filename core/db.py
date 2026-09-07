@@ -41,6 +41,8 @@ class Database:
         """
         self.db_path = db_path
         self._local = threading.local()
+        self._conns: list[sqlite3.Connection] = []
+        self._lock = threading.Lock()
 
     def _get_conn(self) -> sqlite3.Connection:
         """获取当前线程的数据库连接，自动创建。
@@ -53,6 +55,8 @@ class Database:
                 str(self.db_path), check_same_thread=False
             )
             self._local.conn.row_factory = sqlite3.Row
+            with self._lock:
+                self._conns.append(self._local.conn)
         return self._local.conn
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -114,9 +118,15 @@ class Database:
                 new_name TEXT NOT NULL,
                 path TEXT NOT NULL,
                 profile TEXT NOT NULL,
+                batch_id TEXT DEFAULT '',
                 timestamp TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             )
         """)
+        # 迁移：旧库缺 batch_id 列
+        try:
+            self.execute("ALTER TABLE rename_history ADD COLUMN batch_id TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         self.execute("""
             CREATE TABLE IF NOT EXISTS screenshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,11 +166,20 @@ class Database:
 
         sql = f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(col_defs)})"
         self.execute(sql)
-        # 迁移：v1 表缺少 crid 列
-        try:
-            self.execute(f"ALTER TABLE {table} ADD COLUMN crid TEXT DEFAULT ''")
-        except sqlite3.OperationalError:
-            pass
+        # 迁移：为已存在的表补齐缺失列（含 crid 及用户在配置页新增的扩展列）
+        self._migrate_columns(table, col_defs)
+
+    def _migrate_columns(self, table: str, col_defs: list[str]) -> None:
+        """将表缺的列逐列 ALTER 补上；已存在或类型不匹配的列保持不变。"""
+        existing = {r["name"] for r in self.fetchall(f"PRAGMA table_info({table})")}
+        for col_def in col_defs:
+            name = col_def.split()[0]
+            if name in existing:
+                continue
+            try:
+                self.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+            except sqlite3.OperationalError:
+                pass
 
     def ensure_all_media_tables(self, config_mgr) -> None:
         """根据配置为所有 Profile 创建媒体表。
@@ -189,7 +208,8 @@ class Database:
     # ==================== rename_history 操作 ====================
 
     def add_rename_history(
-        self, old_name: str, new_name: str, path: str, profile: str
+        self, old_name: str, new_name: str, path: str, profile: str,
+        batch_id: str = "",
     ) -> None:
         """记录一次重命名操作，用于后续 rollback。
 
@@ -198,11 +218,12 @@ class Database:
             new_name: 新文件名
             path: 文件所在目录
             profile: 所属 Profile 名称
+            batch_id: 批次标识（同一批操作共享，供 rollback 上一批使用）
         """
         self.execute(
-            "INSERT INTO rename_history (old_name, new_name, path, profile) "
-            "VALUES (?, ?, ?, ?)",
-            (old_name, new_name, path, profile),
+            "INSERT INTO rename_history (old_name, new_name, path, profile, batch_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (old_name, new_name, path, profile, batch_id),
         )
 
     def get_rename_history(
@@ -239,10 +260,21 @@ class Database:
         )
 
     def get_last_batch(self, profile: str, window_sec: int = 5) -> list[sqlite3.Row]:
-        """获取最近一批重命名记录（最近一条 ± window_sec 内的所有记录）。"""
+        """获取最近一批重命名记录。
+
+        优先按 batch_id 精确分组（同一批操作共享 batch_id）；
+        旧记录无 batch_id 时回退到 ±window_sec 时间窗口。
+        """
         last = self.get_last_rename(profile)
         if not last:
             return []
+        batch_id = last["batch_id"]
+        if batch_id:
+            return self.fetchall(
+                "SELECT * FROM rename_history WHERE profile=? AND batch_id=? "
+                "ORDER BY id",
+                (profile, batch_id),
+            )
         ts = last["timestamp"]
         return self.fetchall(
             "SELECT * FROM rename_history WHERE profile=? "
@@ -328,17 +360,22 @@ class Database:
             **extra: 扩展列键值对
         """
         table = f"media_{profile}"
-        columns = ["title", "mv_path", "cover"]
-        values: list = [title, mv_path, cover]
+        columns = ["title", "mv_path"]
+        values: list = [title, mv_path]
+        if cover is not None:
+            columns.append("cover")
+            values.append(cover)
         for k, v in extra.items():
             columns.append(k)
             values.append(v)
 
         placeholders = ", ".join(["?"] * len(columns))
         col_names = ", ".join(columns)
+        # UPSERT：冲突时只更新传入的列，保留 cover/added_time/id
+        updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c != "mv_path")
         sql = (
-            f"INSERT OR REPLACE INTO {table} ({col_names}) "
-            f"VALUES ({placeholders})"
+            f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}) "
+            f"ON CONFLICT(mv_path) DO UPDATE SET {updates}"
         )
         self.execute(sql, tuple(values))
 
@@ -480,7 +517,14 @@ class Database:
         return row["cnt"] if row else 0
 
     def close(self) -> None:
-        """关闭当前线程的数据库连接。"""
+        """关闭所有线程的数据库连接。"""
         if hasattr(self._local, "conn") and self._local.conn:
             self._local.conn.close()
             self._local.conn = None
+        with self._lock:
+            for conn in self._conns:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._conns.clear()

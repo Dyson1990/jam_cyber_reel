@@ -14,7 +14,7 @@ import json
 
 from nicegui import ui
 
-from ui.state import update_drawer_info, switch_page, tag
+from ui.state import update_drawer_info, render_workspace_menu, switch_page, tag
 from workspaces._shared import save_config
 
 
@@ -112,7 +112,7 @@ def build_config(config_mgr, registry):
             on_click=lambda: _save_config(
                 config_mgr, profile, root_input.value, from_input.value, to_input.value,
                 rules_editor.value, schema_editor.value, ss_editor.value, extra_editor.value,
-                status_label,
+                registry.db, status_label,
             ),
         ).classes(
             "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono "
@@ -127,14 +127,15 @@ def build_config(config_mgr, registry):
 
 
 def _on_profile_switch(new_profile: str, config_mgr):
-    """切换 Profile：更新 current_profile + 刷新抽屉 + 重建页面。"""
+    """切换 Profile：更新 current_profile + 刷新抽屉（含专用菜单）+ 重建页面。"""
     config_mgr.current_profile = new_profile
+    render_workspace_menu()
     update_drawer_info()
     switch_page("config")
 
 
 def _save_config(config_mgr, profile, root, from_path, to_path,
-                 rules_str, schema_str, ss_str, extra_str, status_label):
+                 rules_str, schema_str, ss_str, extra_str, db, status_label):
     """保存配置回调，校验/持久化委托 workspaces._shared.save_config。"""
     err = save_config(
         config_mgr, profile, root, from_path, to_path,
@@ -144,6 +145,10 @@ def _save_config(config_mgr, profile, root, from_path, to_path,
         status_label.set_text(err)
         status_label.classes("text-red-400 text-sm font-mono mt-4")
         return
+    # 保存后补齐 media 表缺失的新增扩展列，避免后续 upsert 报「no such column」
+    db.create_media_table(
+        profile, config_mgr.get_profile_config(profile).get("table_schema", [])
+    )
     update_drawer_info()
     status_label.set_text("配置已保存 ✓")
     status_label.classes("text-green-400 text-sm font-mono mt-4")

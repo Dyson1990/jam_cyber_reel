@@ -2,19 +2,35 @@
 
 import os
 
+from core.files import is_subpath
+
 
 def get_exclude_dirs(root: str, *sub_paths: str) -> list[str]:
-    """返回 root 下需排除的子目录（sub_path 在 root 下时返回其完整路径）。"""
+    """返回 root 下需排除的子目录（sub_path 严格位于 root 下时返回其路径）。"""
     if not root:
         return []
-    root_norm = os.path.normpath(root).lower()
     result: list[str] = []
     for sp in sub_paths:
         if not sp:
             continue
-        sp_norm = os.path.normpath(sp).lower()
-        if sp_norm.startswith(root_norm) and sp_norm != root_norm:
-            result.append(sp_norm)
+        if is_subpath(sp, root) and not is_subpath(root, sp):
+            result.append(os.path.normpath(sp).lower())
+    return result
+
+
+def get_relative_exclude_dirs(root: str, *sub_paths: str) -> list[str]:
+    """返回 sub_path 相对 root 的首段相对目录名（供 scan_videos 使用）。"""
+    if not root:
+        return []
+    root_norm = os.path.normpath(root)
+    result: list[str] = []
+    for sp in sub_paths:
+        if not sp:
+            continue
+        if is_subpath(sp, root) and not is_subpath(root, sp):
+            rel = os.path.normpath(sp)[len(root_norm):].lstrip(os.sep)
+            if rel:
+                result.append(rel.split(os.sep)[0])
     return result
 
 
@@ -27,16 +43,12 @@ def filter_records(records: list, cfg: dict) -> tuple[list, bool]:
     root = cfg.get("root", "")
     if not root or not records:
         return list(records), False
-    root_norm = os.path.normpath(root).lower()
     exclude_prefixes = get_exclude_dirs(root, cfg.get("from", ""), cfg.get("to", ""))
-    filtered = []
-    for r in records:
-        rp = os.path.normpath(r["mv_path"]).lower()
-        if not rp.startswith(root_norm):
-            continue
-        if any(rp.startswith(ep) for ep in exclude_prefixes):
-            continue
-        filtered.append(r)
+    filtered = [
+        r for r in records
+        if is_subpath(r["mv_path"], root)
+        and not any(is_subpath(r["mv_path"], ep) for ep in exclude_prefixes)
+    ]
     if filtered:
         return filtered, False
     return list(records), True

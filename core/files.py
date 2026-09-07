@@ -9,6 +9,18 @@ from pathlib import Path
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".ts"}
 
 
+def is_subpath(path: str, parent: str) -> bool:
+    """判断 path 是否等于 parent 或位于 parent 之下。
+
+    大小写不敏感，且按路径边界比较——避免 "new" 误匹配 "new2"。
+    """
+    p = os.path.normpath(path).lower()
+    par = os.path.normpath(parent).lower().rstrip(os.sep)
+    if not par:
+        return False
+    return p == par or p.startswith(par + os.sep)
+
+
 # ==================== 扫描 ====================
 
 def scan_videos(root: Path, exclude_dirs: list[str] | None = None) -> list[Path]:
@@ -22,7 +34,7 @@ def scan_videos(root: Path, exclude_dirs: list[str] | None = None) -> list[Path]
     exclude_prefixes: list[str] = []
     if exclude_dirs:
         for d in exclude_dirs:
-            exclude_prefixes.append(os.path.normpath(str(root_path / d)).lower())
+            exclude_prefixes.append(os.path.normpath(str(root_path / d)))
 
     seen: set[str] = set()
     files: list[Path] = []
@@ -31,9 +43,9 @@ def scan_videos(root: Path, exclude_dirs: list[str] | None = None) -> list[Path]
             continue
         if f.is_dir():
             continue
-        f_norm = os.path.normpath(str(f)).lower()
-        if exclude_prefixes and any(f_norm.startswith(ep) for ep in exclude_prefixes):
+        if exclude_prefixes and any(is_subpath(str(f), ep) for ep in exclude_prefixes):
             continue
+        f_norm = os.path.normpath(str(f)).lower()
         if f_norm not in seen:
             seen.add(f_norm)
             files.append(f)
@@ -48,8 +60,14 @@ def rename_files(
     db,
     profile_name: str,
 ) -> list[dict]:
-    """两阶段重命名（UUID 中转防冲突），记录到 rename_history。"""
+    """两阶段重命名（UUID 中转防冲突），记录到 rename_history。
+
+    阶段2 失败时把文件从 UUID 名恢复原名，避免遗留不可识别的随机名。
+    """
     records: list[dict] = []
+    if target_dir is not None:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    batch_id = uuid.uuid4().hex
 
     # 阶段1: → UUID
     temp: dict[Path, Path] = {}
@@ -79,27 +97,41 @@ def rename_files(
                 c += 1
         try:
             tmp_dest.rename(final_dest)
-            actual_name = final_dest.name
-            db.add_rename_history(
-                old_name=old_path.name, new_name=actual_name,
-                path=str(dest_dir), profile=profile_name,
-            )
-            records.append({
-                "old_name": old_path.name, "new_name": actual_name,
-                "path": str(dest_dir), "status": "成功",
-            })
         except OSError as e:
+            _restore(tmp_dest, old_path)
             records.append({
                 "old_name": old_path.name, "new_name": new_name,
-                "path": str(dest_dir), "status": f"阶段2失败: {e}",
+                "path": str(dest_dir), "status": f"阶段2失败: {e}（已恢复原名）",
             })
+            continue
+        actual_name = final_dest.name
+        db.add_rename_history(
+            old_name=old_path.name, new_name=actual_name,
+            path=str(dest_dir), profile=profile_name, batch_id=batch_id,
+        )
+        records.append({
+            "old_name": old_path.name, "new_name": actual_name,
+            "path": str(dest_dir), "status": "成功",
+        })
     return records
+
+
+def _restore(tmp_dest: Path, original: Path) -> None:
+    """阶段2失败时，把 UUID 中转文件恢复为原名。"""
+    try:
+        if tmp_dest.exists():
+            tmp_dest.rename(original)
+    except OSError:
+        pass
 
 
 # ==================== 回滚 ====================
 
 def rollback_records(records: list, db, source_dir: Path | None = None) -> list[dict]:
-    """回滚一批重命名记录：从 path/new_name 移回 source_dir/old_name。"""
+    """回滚一批重命名记录：从 path/new_name 移回 source_dir/old_name。
+
+    目标名已存在时追加序号而非覆盖，避免破坏已有文件。
+    """
     results: list[dict] = []
     for rec in records:
         cur = Path(rec["path"]) / rec["new_name"]
@@ -107,13 +139,16 @@ def rollback_records(records: list, db, source_dir: Path | None = None) -> list[
         orig = orig_dir / rec["old_name"]
         if cur.exists():
             try:
-                if orig.exists():
-                    orig.unlink()
                 orig_dir.mkdir(parents=True, exist_ok=True)
+                if orig.exists():
+                    stem, c = orig.stem, 1
+                    while orig.exists():
+                        orig = orig_dir / f"{stem}_{c}{orig.suffix}"
+                        c += 1
                 cur.rename(orig)
                 db.delete_rename_history(rec["id"])
                 results.append({
-                    "old_name": rec["new_name"], "new_name": rec["old_name"],
+                    "old_name": rec["new_name"], "new_name": orig.name,
                     "path": str(orig_dir), "status": "已回滚",
                 })
             except OSError as e:

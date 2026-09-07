@@ -30,27 +30,8 @@ from nicegui import ui
 
 from ui.state import update_drawer_info, tag
 from core.screenshots import capture_one_video
+from core.common.browser import get_relative_exclude_dirs
 from ui.state import clear_cancel, cancel_requested
-
-
-def _get_exclude_dirs(root: str, *sub_paths: str) -> list[str]:
-    """若 sub_path 在 root 下，返回其相对路径首段作为排除目录。
-
-    用 os.path.normpath 代替 Path.resolve()：后者在 UNC 网络路径上会阻塞。"""
-    import os
-    if not root:
-        return []
-    root_norm = os.path.normpath(root).lower()
-    result: list[str] = []
-    for sp in sub_paths:
-        if not sp:
-            continue
-        sp_norm = os.path.normpath(sp).lower()
-        if sp_norm.startswith(root_norm):
-            rel = sp_norm[len(root_norm):].lstrip(os.sep)
-            if rel:
-                result.append(rel.split(os.sep)[0])
-    return result
 
 
 # 模块级共享日志容器引用（build_sync 中赋值，页面切换时自动重建）
@@ -114,7 +95,7 @@ def build_sync(config_mgr, db, registry):
     root = cfg.get("root", "") or "未设置"
     from_path = cfg.get("from", "")
     to_path = cfg.get("to", "")
-    exclude_dirs = _get_exclude_dirs(cfg.get("root", ""), from_path, to_path)
+    exclude_dirs = get_relative_exclude_dirs(cfg.get("root", ""), from_path, to_path)
 
     # 标题
     tag("sync")
@@ -374,6 +355,7 @@ async def _run_db_sync(handler, exclude_dirs, crid_pattern: str = ""):
             handler.sync_db,
             exclude_dirs=exclude_dirs if exclude_dirs else None,
             crid_pattern=crid_pattern,
+            added=diff["added"],
         )
         _log(f"  已写入 {count} 条新记录", "green")
 

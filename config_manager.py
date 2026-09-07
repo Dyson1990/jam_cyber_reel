@@ -52,7 +52,12 @@ class ConfigManager:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, OSError):
-                pass
+                # 备份损坏文件，避免后续 save() 覆盖前丢失原配置
+                try:
+                    bak = self.config_path.with_name(self.config_path.name + ".bak")
+                    bak.write_bytes(self.config_path.read_bytes())
+                except OSError:
+                    pass
         return self._default_config()
 
     def _default_config(self) -> dict:
@@ -125,7 +130,8 @@ class ConfigManager:
                     "from": "",
                     "to": "",
                     "naming_rules": {
-                        "pattern": r"^(.*?)[\-_\.\s]+(.*)$"
+                        "pattern": r"^(.*?)[\-_\.\s]+(.*)$",
+                        "replacement": r"\1 - \2",
                     },
                     "extra_config": {},
                     "screenshot_config": {"count": 2, "moments": []},
