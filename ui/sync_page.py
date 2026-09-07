@@ -131,7 +131,7 @@ def build_sync(config_mgr, db, registry):
     with ui.row().classes("w-full").style("position: relative;"):
         # === 左侧操作区（留出右侧空间，避免内容被遮挡） ===
         with ui.column().classes("flex-1 min-w-0").style("margin-right: calc(38% + 1rem);"):
-            _build_db_sync_card(handler, root, exclude_dirs)
+            _build_db_sync_card(handler, root, exclude_dirs, config_mgr)
             _build_screenshot_card(handler, root, cfg)
             _build_rename_card(handler, root, from_path, to_path)
 
@@ -157,8 +157,11 @@ def build_sync(config_mgr, db, registry):
             ui.timer(0.3, _scroll_log)
 
 
-def _build_db_sync_card(handler, root, exclude_dirs):
+def _build_db_sync_card(handler, root, exclude_dirs, config_mgr):
     """数据库同步卡片。"""
+    profile = handler.profile_name
+    crid_pattern = handler.config.get("crid_pattern", "")
+
     with ui.card().classes(
         "bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"
     ):
@@ -176,6 +179,16 @@ def _build_db_sync_card(handler, root, exclude_dirs):
                 "text-xs text-gray-600 font-mono mb-4"
             )
 
+        # crid 正则输入（自动保存到 Profile 配置）
+        with ui.row().classes("gap-2 items-center mb-3"):
+            ui.label("crid 正则:").classes("text-xs text-gray-500 font-mono")
+            crid_input = ui.input(
+                value=crid_pattern, placeholder="例如: CRID-(\\d+)",
+            ).classes("w-56 font-mono text-xs").props("outlined dense dark")
+            crid_input.on("change", lambda e: (
+                config_mgr.update_profile_config(profile, "crid_pattern", e.value or "")
+            ))
+
         with ui.row().classes("gap-4"):
             ui.button(
                 "▶ 对比差异",
@@ -187,7 +200,9 @@ def _build_db_sync_card(handler, root, exclude_dirs):
 
             ui.button(
                 "▶ 数据库同步",
-                on_click=lambda: _run_db_sync(handler, exclude_dirs),
+                on_click=lambda: _run_db_sync(
+                    handler, exclude_dirs, (crid_input.value or "").strip(),
+                ),
             ).classes(
                 "bg-green-900 hover:bg-green-700 text-green-300 font-mono "
                 "border border-green-600 rounded px-6 py-2"
@@ -271,7 +286,7 @@ def _build_rename_card(handler, root, from_path, to_path):
 
 # ==================== 数据库同步逻辑 ====================
 
-def _run_db_diff(handler, exclude_dirs):
+async def _run_db_diff(handler, exclude_dirs):
     """对比 Root 文件与数据库记录，展示增减清单。"""
     _clear_log()
     _set_running("对比差异")
@@ -280,10 +295,23 @@ def _run_db_diff(handler, exclude_dirs):
     if exclude_dirs:
         _log(f"  排除目录: {exclude_dirs}", "gray")
 
+    if cancel_requested():
+        _log("◆ 用户取消", "yellow")
+        _set_ready()
+        return
+
     try:
-        diff = handler.diff_db(exclude_dirs=exclude_dirs if exclude_dirs else None)
+        diff = await asyncio.to_thread(
+            handler.diff_db,
+            exclude_dirs=exclude_dirs if exclude_dirs else None,
+        )
     except Exception as e:
         _log(f"  对比失败: {e}", "red")
+        _set_ready()
+        return
+
+    if cancel_requested():
+        _log("◆ 用户取消", "yellow")
         _set_ready()
         return
 
@@ -311,18 +339,37 @@ def _run_db_diff(handler, exclude_dirs):
     _set_ready()
 
 
-def _run_db_sync(handler, exclude_dirs):
+async def _run_db_sync(handler, exclude_dirs, crid_pattern: str = ""):
     """执行数据库同步：将 Root 中新增文件写入 media 表。"""
     _clear_log()
     _set_running("数据库同步")
 
     _log("◆ 开始数据库同步...", "cyan")
+    if crid_pattern:
+        _log(f"  crid 提取: {crid_pattern}", "gray")
+
+    if cancel_requested():
+        _log("◆ 用户取消", "yellow")
+        _set_ready()
+        return
 
     try:
-        diff = handler.diff_db(exclude_dirs=exclude_dirs if exclude_dirs else None)
+        diff = await asyncio.to_thread(
+            handler.diff_db,
+            exclude_dirs=exclude_dirs if exclude_dirs else None,
+        )
         _log(f"  发现 {len(diff['added'])} 个新增文件", "gray")
 
-        count = handler.sync_db(exclude_dirs=exclude_dirs if exclude_dirs else None)
+        if cancel_requested():
+            _log("◆ 用户取消", "yellow")
+            _set_ready()
+            return
+
+        count = await asyncio.to_thread(
+            handler.sync_db,
+            exclude_dirs=exclude_dirs if exclude_dirs else None,
+            crid_pattern=crid_pattern,
+        )
         _log(f"  已写入 {count} 条新记录", "green")
 
         if diff["removed"]:
@@ -439,7 +486,7 @@ async def _run_capture_screenshots(handler):
 
 # ==================== 文件名更新逻辑 ====================
 
-def _run_rename(handler):
+async def _run_rename(handler):
     """执行文件名更新：扫描 from → normalize → rename（移动到 to）。
 
     流程：
@@ -471,12 +518,22 @@ def _run_rename(handler):
         _set_ready()
         return
 
+    if cancel_requested():
+        _log("◆ 用户取消", "yellow")
+        _set_ready()
+        return
+
     # Step 1: scan from 目录
     try:
-        files = handler.scan(root_override=from_dir)
+        files = await asyncio.to_thread(handler.scan, root_override=from_dir)
         _log(f"  scan: 在 {from_dir} 中发现 {len(files)} 个视频文件", "gray")
     except Exception as e:
         _log(f"  scan 失败: {e}", "red")
+        _set_ready()
+        return
+
+    if cancel_requested():
+        _log("◆ 用户取消", "yellow")
         _set_ready()
         return
 
@@ -492,7 +549,7 @@ def _run_rename(handler):
 
     # Step 2: normalize
     try:
-        raw_mapping = handler.normalize(files)
+        raw_mapping = await asyncio.to_thread(handler.normalize, files)
         # 仅保留文件名真正变化的条目
         mapping = {
             p: n for p, n in raw_mapping.items() if p.name != n
@@ -509,6 +566,11 @@ def _run_rename(handler):
         _set_ready()
         return
 
+    if cancel_requested():
+        _log("◆ 用户取消", "yellow")
+        _set_ready()
+        return
+
     if not mapping:
         _log("  无需更名，跳过 rename", "gray")
         _set_ready()
@@ -516,7 +578,9 @@ def _run_rename(handler):
 
     # Step 3: rename → 移动到 to
     try:
-        records = handler.rename(mapping, target_dir=to_dir)
+        records = await asyncio.to_thread(
+            handler.rename, mapping, target_dir=to_dir,
+        )
         ok = sum(1 for r in records if r.get("status") == "成功")
         fail = len(records) - ok
         _log(
@@ -546,22 +610,29 @@ def _get_source_dir(handler):
     return Path(from_path) if from_path else None
 
 
-def _run_rollback_batch(handler):
+async def _run_rollback_batch(handler):
     """回滚上一批（最近一次点击"文件名更新"的全部记录）。"""
     _clear_log()
     _set_running("回滚上一批")
     _log("◆ 回滚上一批...", "yellow")
 
+    if cancel_requested():
+        _log("◆ 用户取消", "yellow")
+        _set_ready()
+        return
+
     source_dir = _get_source_dir(handler)
     try:
-        results = handler.rollback_last_batch(source_dir=source_dir)
+        results = await asyncio.to_thread(
+            handler.rollback_last_batch, source_dir=source_dir,
+        )
         _log_batch_results(results)
     except Exception as e:
         _log(f"  回滚失败: {e}", "red")
     _set_ready()
 
 
-def _run_rollback_range(handler, date_from, date_to):
+async def _run_rollback_range(handler, date_from, date_to):
     """按日期范围回滚。"""
     _clear_log()
     sd = (date_from.value or "").strip().replace("/", "-")
@@ -572,9 +643,16 @@ def _run_rollback_range(handler, date_from, date_to):
     _set_running("批量回滚")
     _log(f"◆ 回滚 {sd} ~ {ed}...", "yellow")
 
+    if cancel_requested():
+        _log("◆ 用户取消", "yellow")
+        _set_ready()
+        return
+
     source_dir = _get_source_dir(handler)
     try:
-        results = handler.rollback_date_range(sd, ed, source_dir=source_dir)
+        results = await asyncio.to_thread(
+            handler.rollback_date_range, sd, ed, source_dir=source_dir,
+        )
         _log_batch_results(results)
     except Exception as e:
         _log(f"  回滚失败: {e}", "red")

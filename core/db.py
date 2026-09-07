@@ -146,6 +146,7 @@ class Database:
             "title TEXT NOT NULL",
             "mv_path TEXT NOT NULL UNIQUE",
             "cover BLOB",
+            "crid TEXT DEFAULT ''",
             "added_time TEXT DEFAULT (datetime('now','localtime'))",
         ]
         for col in columns:
@@ -155,6 +156,11 @@ class Database:
 
         sql = f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(col_defs)})"
         self.execute(sql)
+        # 迁移：v1 表缺少 crid 列
+        try:
+            self.execute(f"ALTER TABLE {table} ADD COLUMN crid TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
 
     def ensure_all_media_tables(self, config_mgr) -> None:
         """根据配置为所有 Profile 创建媒体表。

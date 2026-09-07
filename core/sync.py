@@ -8,6 +8,7 @@
 """
 
 import os
+import re
 from pathlib import Path
 
 from core.files import scan_videos, VIDEO_EXTENSIONS
@@ -36,18 +37,38 @@ def diff_db(
 
 def sync_db(
     root: str, db, profile_name: str, exclude_dirs: list[str] | None = None,
+    crid_pattern: str = "",
 ) -> int:
-    """将 root 中新增文件写入 media 表，返回新增数."""
+    """将 root 中新增文件写入 media 表，返回新增数。
+
+    若 crid_pattern 非空，从文件名匹配正则提取 crid：
+    - 有捕获组时取 group(1)，否则取 group(0)
+    """
     d = diff_db(root, db, profile_name, exclude_dirs=exclude_dirs)
     count = 0
     for f in d["added"]:
         if f.exists():
+            crid = _extract_crid(f.stem, crid_pattern)
             db.upsert_media(
                 profile=profile_name, title=f.stem,
                 mv_path=str(f), file_size=f.stat().st_size,
+                crid=crid,
             )
             count += 1
     return count
+
+
+def _extract_crid(stem: str, pattern: str) -> str:
+    """从文件名 stem 用正则提取 crid，pattern 为空或匹配失败返回 ''。"""
+    if not pattern:
+        return ""
+    try:
+        m = re.search(pattern, stem)
+        if m:
+            return m.group(1) if m.lastindex else m.group(0)
+    except re.error:
+        pass
+    return ""
 
 
 def build_db(root: str, db, profile_name: str) -> int:

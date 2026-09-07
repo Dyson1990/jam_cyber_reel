@@ -75,6 +75,7 @@ class ConfigManager:
                     "to": "",
                     "naming_rules": {},
                     "extra_config": {},
+                    "crid_pattern": "",
                     "screenshot_config": {"count": 3, "moments": []},
                     "table_schema": [
                         {"name": "director", "type": "TEXT", "label": "导演"},
@@ -92,6 +93,7 @@ class ConfigManager:
                     "to": "",
                     "naming_rules": {},
                     "extra_config": {},
+                    "crid_pattern": "",
                     "screenshot_config": {"count": 3, "moments": []},
                     "table_schema": [
                         {"name": "series", "type": "TEXT", "label": "系列"},
