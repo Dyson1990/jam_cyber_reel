@@ -28,7 +28,7 @@ from pathlib import Path
 
 from nicegui import ui
 
-from ui.state import update_drawer_info
+from ui.state import update_drawer_info, tag
 from core.screenshots import capture_one_video
 from ui.state import clear_cancel, cancel_requested
 
@@ -117,6 +117,7 @@ def build_sync(config_mgr, db, registry):
     exclude_dirs = _get_exclude_dirs(cfg.get("root", ""), from_path, to_path)
 
     # 标题
+    tag("sync")
     ui.label(f"◆ 同步 — {profile}").classes(
         "text-xl font-mono text-cyan-400 mb-6 glow-text"
     )
@@ -142,6 +143,7 @@ def build_sync(config_mgr, db, registry):
             "position: absolute; top: 0; right: 0; bottom: 0; width: 38%; "
             "display: flex; flex-direction: column;"
         ):
+            tag("sync-log")
             ui.label("◆ 运行日志").classes("text-lg font-mono text-cyan-400 mb-3 flex-none")
             scroll_area = ui.column().classes("overflow-y-auto w-full").style("flex: 1 1 0%; min-height: 0;")
             _log_container = scroll_area
@@ -165,6 +167,7 @@ def _build_db_sync_card(handler, root, exclude_dirs, config_mgr):
     with ui.card().classes(
         "bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"
     ):
+        tag("sync-db")
         ui.label("◆ 数据库同步").classes("text-lg font-mono text-cyan-400 mb-2")
         ui.label(
             "扫描 Root 中全部视频文件，与数据库记录对比，更新差异。"
@@ -214,6 +217,7 @@ def _build_screenshot_card(handler, root, cfg):
     with ui.card().classes(
         "bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"
     ):
+        tag("sync-screenshot")
         ui.label("◆ 截图采集").classes("text-lg font-mono text-cyan-400 mb-2")
         ui.label(
             "使用 PyAV 从视频文件中提取帧截图，存入 screenshots 表。"
@@ -240,6 +244,7 @@ def _build_rename_card(handler, root, from_path, to_path):
     with ui.card().classes(
         "bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full"
     ):
+        tag("sync-rename")
         ui.label("◆ 文件名更新").classes("text-lg font-mono text-cyan-400 mb-2")
         ui.label(
             "扫描 from 中的新视频，按命名规则规范化后移动到 to。"

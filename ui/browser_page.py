@@ -16,11 +16,12 @@
 """
 
 import base64
-import os
-from collections import defaultdict
 from pathlib import Path
 
 from nicegui import ui
+
+from core.common.browser import filter_records, format_cell
+from ui.state import tag
 
 
 def _load_covers(total: int, render_fn):
@@ -33,21 +34,6 @@ def _load_covers(total: int, render_fn):
     status_text.set_text("就绪")
     if status_progress:
         status_progress.set_value(0)
-
-
-def _get_exclude_dirs(root: str, *sub_paths: str) -> list[str]:
-    """若 sub_path 在 root 下，返回其相对路径首段作为排除目录前缀。"""
-    if not root:
-        return []
-    root_norm = os.path.normpath(root).lower()
-    result: list[str] = []
-    for sp in sub_paths:
-        if not sp:
-            continue
-        sp_norm = os.path.normpath(sp).lower()
-        if sp_norm.startswith(root_norm) and sp_norm != root_norm:
-            result.append(sp_norm)
-    return result
 
 
 def build_browser(config_mgr, db):
@@ -65,6 +51,7 @@ def build_browser(config_mgr, db):
     table_schema = cfg.get("table_schema", [])
     root = cfg.get("root", "")
 
+    tag("browser")
     ui.label("◆ MEDIA BROWSER").classes("text-xl font-mono text-cyan-400 mb-6 glow-text")
     ui.label(f"Profile: {profile}  |  Root: {root or '未设置'}").classes(
         "text-sm text-gray-500 font-mono mb-4"
@@ -73,22 +60,7 @@ def build_browser(config_mgr, db):
     records = db.get_media_by_profile(profile)
 
     # 过滤：仅 root 路径下的视频，排除 from/to 目录
-    root_mismatch = False
-    if root and records:
-        root_norm = os.path.normpath(root).lower()
-        exclude_prefixes = _get_exclude_dirs(root, cfg.get("from", ""), cfg.get("to", ""))
-        filtered = []
-        for r in records:
-            rp = os.path.normpath(r["mv_path"]).lower()
-            if not rp.startswith(root_norm):
-                continue
-            if any(rp.startswith(ep) for ep in exclude_prefixes):
-                continue
-            filtered.append(r)
-        if filtered:
-            records = filtered
-        else:
-            root_mismatch = True
+    records, root_mismatch = filter_records(records, cfg)
 
     if not records:
         with ui.card().classes("bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full"):
@@ -96,6 +68,7 @@ def build_browser(config_mgr, db):
             ui.label("请先在 Sync 页面执行同步").classes("text-gray-600 font-mono text-sm mt-2")
         return
 
+    tag("browser-toolbar")
     if root_mismatch:
         ui.label(f"⚠ Root 不匹配任何记录，显示全部 {len(records)} 条").classes(
             "text-sm text-yellow-400 font-mono mb-2")
@@ -108,6 +81,7 @@ def build_browser(config_mgr, db):
                 "border border-cyan-600 rounded px-4 py-1")
 
     # 表格容器必须在按钮行之后创建，确保渲染在其下方
+    tag("media-table")
     table_container = ui.column().classes("w-full")
 
     def render_table(with_covers: bool = False):
@@ -172,7 +146,7 @@ def _render_media_row(item, table_schema: list[dict], db, load_covers: bool = Fa
         for col in table_schema:
             col_name = col["name"]
             value = item[col_name] if col_name in item.keys() else None
-            display = _format_cell(value, col)
+            display = format_cell(value, col)
             cell = ui.label(display)
             cell.classes("text-sm font-mono text-gray-400").style("flex: 1;")
             if col_name in ("series", "director"):
@@ -268,18 +242,6 @@ def _render_shot_btn(mv_path: str, db):
     btn.style("width: 80px;")
 
 
-def _format_cell(value, col: dict) -> str:
-    """根据列类型格式化单元格显示值。"""
-    if value is None:
-        return "—"
-    col_type = col.get("type", "TEXT")
-    if col_type == "INTEGER" and col["name"] == "file_size":
-        return _format_size(int(value))
-    if col_type in ("REAL",) and isinstance(value, float):
-        return f"{value:.1f}"
-    return str(value)
-
-
 def _placeholder_cover():
     """生成封面占位符（纯色方块）。"""
     ui.html(
@@ -287,14 +249,3 @@ def _placeholder_cover():
         'border:1px solid #333;display:flex;align-items:center;'
         'justify-content:center;color:#555;font-size:10px;">N/A</div>'
     ).style("width: 86px;")
-
-
-def _format_size(size_bytes: int) -> str:
-    """将字节数格式化为人类可读的文件大小。"""
-    if size_bytes <= 0:
-        return "—"
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}" if unit != "B" else f"{size_bytes} B"
-        size_bytes /= 1024
-    return f"{size_bytes:.1f} PB"

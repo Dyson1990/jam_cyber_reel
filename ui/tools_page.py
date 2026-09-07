@@ -6,33 +6,16 @@
 
 与其它模块的关系：
     - 被 ui/state.py 的 switch_page("tools") 调用
-    - 通过 subprocess 运行脚本
-    - 使用 config_mgr 获取当前 Profile 的 root 作为默认参数
+    - 脚本扫描/运行委托 core/common/tools.py
 
 主要函数：
     build_tools(config_mgr, db) - 构建工具页 UI
 """
 
-import os
-import subprocess
-import sys
-from pathlib import Path
-
 from nicegui import ui
 
-# 项目根目录
-_PROJECT_ROOT = Path(__file__).parent.parent
-_TOOLS_DIR = _PROJECT_ROOT / "tools"
-
-
-def _list_scripts() -> list[Path]:
-    """扫描 tools/ 目录，返回所有 .py 脚本路径。"""
-    if not _TOOLS_DIR.exists():
-        return []
-    return sorted(
-        f for f in _TOOLS_DIR.iterdir()
-        if f.suffix == ".py" and not f.name.startswith("_")
-    )
+from core.common.tools import list_scripts, run_script
+from ui.state import tag
 
 
 def build_tools(config_mgr, db):
@@ -44,8 +27,9 @@ def build_tools(config_mgr, db):
         config_mgr: ConfigManager 实例
         db: Database 实例
     """
-    scripts = _list_scripts()
+    scripts = list_scripts()
 
+    tag("tools")
     ui.label("◆ TOOLS").classes("text-xl font-mono text-cyan-400 mb-6 glow-text")
 
     if not scripts:
@@ -55,6 +39,7 @@ def build_tools(config_mgr, db):
     with ui.row().classes("w-full gap-4"):
         # 左侧：脚本列表
         with ui.column().classes("gap-2").style("width: 200px;"):
+            tag("script-list")
             ui.label("脚本列表").classes("text-xs text-gray-500 font-mono mb-2")
             selected_script = {"path": scripts[0]}  # 用 dict 保存可变引用
 
@@ -93,6 +78,7 @@ def build_tools(config_mgr, db):
             """)
 
             # 源码区
+            tag("script-source")
             ui.label("源码").classes("text-xs text-gray-500 font-mono")
             source_area = (
                 ui.textarea(value="")
@@ -101,6 +87,7 @@ def build_tools(config_mgr, db):
             )
 
             # 参数区
+            tag("script-args")
             ui.label("参数（留空则使用 Profile 的 root 路径）").classes("text-xs text-gray-500 font-mono")
             args_input = (
                 ui.input(value="", placeholder="路径或参数，空格分隔")
@@ -110,6 +97,7 @@ def build_tools(config_mgr, db):
 
             # 按钮行
             with ui.row().classes("gap-4"):
+                tag("script-actions")
                 run_btn = ui.button(
                     "▶ 运行",
                     on_click=lambda: _run_script(
@@ -131,6 +119,7 @@ def build_tools(config_mgr, db):
                 )
 
             # 运行结果区
+            tag("script-output")
             ui.label("运行结果").classes("text-xs text-gray-500 font-mono mt-2")
             output_area = (
                 ui.textarea(value="")
@@ -156,44 +145,9 @@ def _select_script(script_path, selected, source_area, args_input, output_area):
 
 
 def _run_script(script_path, config_mgr, args_input, output_area):
-    """运行选中的脚本。
-
-    若参数区非空则用参数区内容作为 argv[1:]（空格分隔），
-    否则用当前 Profile 的 root 作为默认参数。
-    """
+    """运行选中的脚本，结果委托 core.common.tools.run_script。"""
     output_area.set_value("运行中...")
-
-    user_args = args_input.value.strip()
-    if user_args:
-        cmd = [sys.executable, str(script_path)] + user_args.split()
-    else:
-        root = config_mgr.get_profile_root() or str(Path.cwd())
-        cmd = [sys.executable, str(script_path), root]
-
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            cwd=str(_PROJECT_ROOT),
-        )
-        output = result.stdout
-        if result.stderr:
-            output += f"\n[stderr]\n{result.stderr}"
-        if not output.strip():
-            output = "(无输出)"
-        output_area.set_value(output)
-    except subprocess.TimeoutExpired:
-        output_area.set_value("运行超时（30秒）")
-    except Exception as e:
-        output_area.set_value(f"运行失败: {e}")
+    output_area.set_value(run_script(script_path, config_mgr, args_input.value))
 
 
 async def _copy_output(output_area):
