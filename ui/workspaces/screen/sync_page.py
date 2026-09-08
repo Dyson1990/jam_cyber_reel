@@ -45,11 +45,11 @@ def _log(msg: str, color: str = "gray"):
         return
     color_cls = {
         "cyan": "text-cyan-400",
-        "gray": "text-gray-400",
-        "green": "text-green-400",
+        "gray": "text-slate-400",
+        "green": "text-blue-400",
         "red": "text-red-400",
-        "yellow": "text-yellow-400",
-    }.get(color, "text-gray-400")
+        "yellow": "text-orange-400",
+    }.get(color, "text-slate-400")
     with _log_container:
         ui.label(msg).classes(f"font-mono text-xs {color_cls}")
 
@@ -119,7 +119,7 @@ def build_sync(config_mgr, db, registry):
 
         # === 右侧共享日志面板（absolute 定位，与左侧三卡严格等高） ===
         with ui.card().classes(
-            "bg-gray-950 border border-cyan-800 rounded-lg p-4"
+            "bg-slate-950 border border-cyan-800 rounded-lg p-4"
         ).style(
             "position: absolute; top: 0; right: 0; bottom: 0; width: 38%; "
             "display: flex; flex-direction: column;"
@@ -146,26 +146,26 @@ def _build_db_sync_card(handler, root, exclude_dirs, config_mgr):
     crid_pattern = handler.config.get("crid_pattern", "")
 
     with ui.card().classes(
-        "bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"
+        "bg-slate-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"
     ):
         tag("sync-db")
         ui.label("◆ 数据库同步").classes("text-lg font-mono text-cyan-400 mb-2")
         ui.label(
             "扫描 Root 中全部视频文件，与数据库记录对比，更新差异。"
-        ).classes("text-sm text-gray-500 font-mono mb-1")
-        ui.label(f"Root: {root}").classes("text-xs text-gray-600 font-mono mb-1")
+        ).classes("text-sm text-slate-500 font-mono mb-1")
+        ui.label(f"Root: {root}").classes("text-xs text-slate-600 font-mono mb-1")
         if exclude_dirs:
             ui.label(f"排除: {exclude_dirs}").classes(
-                "text-xs text-yellow-600 font-mono mb-4"
+                "text-xs text-orange-600 font-mono mb-4"
             )
         else:
             ui.label("from/to 均不在 root 下，无需排除").classes(
-                "text-xs text-gray-600 font-mono mb-4"
+                "text-xs text-slate-600 font-mono mb-4"
             )
 
         # crid 正则输入（自动保存到 Profile 配置）
         with ui.row().classes("gap-2 items-center mb-3"):
-            ui.label("crid 正则:").classes("text-xs text-gray-500 font-mono")
+            ui.label("crid 正则:").classes("text-xs text-slate-500 font-mono")
             crid_input = ui.input(
                 value=crid_pattern, placeholder="例如: CRID-(\\d+)",
             ).classes("w-56 font-mono text-xs").props("outlined dense dark")
@@ -188,28 +188,28 @@ def _build_db_sync_card(handler, root, exclude_dirs, config_mgr):
                     handler, exclude_dirs, (crid_input.value or "").strip(),
                 ),
             ).classes(
-                "bg-green-900 hover:bg-green-700 text-green-300 font-mono "
-                "border border-green-600 rounded px-6 py-2"
+                "bg-blue-900 hover:bg-blue-700 text-blue-300 font-mono "
+                "border border-blue-600 rounded px-6 py-2"
             )
 
 
 def _build_screenshot_card(handler, root, cfg):
     """截图采集卡片。"""
     with ui.card().classes(
-        "bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"
+        "bg-slate-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"
     ):
         tag("sync-screenshot")
         ui.label("◆ 截图采集").classes("text-lg font-mono text-cyan-400 mb-2")
         ui.label(
             "使用 PyAV 从视频文件中提取帧截图，存入 screenshots 表。"
             "后台线程逐文件处理，实时显示进度。"
-        ).classes("text-sm text-gray-500 font-mono mb-1")
-        ui.label(f"Root: {root}").classes("text-xs text-gray-600 font-mono mb-1")
+        ).classes("text-sm text-slate-500 font-mono mb-1")
+        ui.label(f"Root: {root}").classes("text-xs text-slate-600 font-mono mb-1")
         ss_cfg = cfg.get("screenshot_config", {})
         ui.label(
             f"count: {ss_cfg.get('count', 3)}, "
             f"moments: {ss_cfg.get('moments', []) or '（均分）'}"
-        ).classes("text-xs text-gray-600 font-mono mb-4")
+        ).classes("text-xs text-slate-600 font-mono mb-4")
 
         ui.button(
             "▶ 截取截图",
@@ -223,17 +223,17 @@ def _build_screenshot_card(handler, root, cfg):
 def _build_rename_card(handler, root, from_path, to_path):
     """文件名更新卡片。"""
     with ui.card().classes(
-        "bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full"
+        "bg-slate-950 border border-cyan-800 rounded-lg p-6 w-full"
     ):
         tag("sync-rename")
         ui.label("◆ 文件名更新").classes("text-lg font-mono text-cyan-400 mb-2")
         ui.label(
             "扫描 from 中的新视频，按命名规则规范化后移动到 to。"
-        ).classes("text-sm text-gray-500 font-mono mb-1")
-        ui.label(f"Root: {root}").classes("text-xs text-gray-600 font-mono mb-1")
+        ).classes("text-sm text-slate-500 font-mono mb-1")
+        ui.label(f"Root: {root}").classes("text-xs text-slate-600 font-mono mb-1")
         ui.label(
             f"From: {from_path or '未设置'}  →  To: {to_path or '未设置'}"
-        ).classes("text-xs text-yellow-600 font-mono mb-4")
+        ).classes("text-xs text-orange-600 font-mono mb-4")
 
         with ui.row().classes("gap-4 mb-4"):
             ui.button(
@@ -248,8 +248,8 @@ def _build_rename_card(handler, root, from_path, to_path):
                 "↺ 回滚上一批",
                 on_click=lambda: _run_rollback_batch(handler),
             ).classes(
-                "bg-yellow-900 hover:bg-yellow-700 text-yellow-300 font-mono "
-                "border border-yellow-600 rounded px-4 py-2"
+                "bg-orange-900 hover:bg-orange-700 text-orange-300 font-mono "
+                "border border-orange-600 rounded px-4 py-2"
             )
 
         with ui.row().classes("gap-2 items-center"):
@@ -260,11 +260,11 @@ def _build_rename_card(handler, root, from_path, to_path):
                 "bg-red-900 hover:bg-red-700 text-red-300 font-mono "
                 "border border-red-600 rounded px-4 py-2"
             )
-            ui.label("日期范围：").classes("text-xs text-gray-500 font-mono")
+            ui.label("日期范围：").classes("text-xs text-slate-500 font-mono")
             date_from = ui.input(value="", placeholder="YYYY-MM-DD").classes(
                 "w-36 font-mono text-xs"
             ).props("outlined dense dark type=date")
-            ui.label("—").classes("text-gray-600 text-xs")
+            ui.label("—").classes("text-slate-600 text-xs")
             date_to = ui.input(value="", placeholder="YYYY-MM-DD").classes(
                 "w-36 font-mono text-xs"
             ).props("outlined dense dark type=date")

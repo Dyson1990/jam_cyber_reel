@@ -54,7 +54,7 @@ def build_browser(config_mgr, db):
     tag("browser")
     ui.label("◆ MEDIA BROWSER").classes("text-xl font-mono text-cyan-400 mb-6 glow-text")
     ui.label(f"Profile: {profile}  |  Root: {root or '未设置'}").classes(
-        "text-sm text-gray-500 font-mono mb-4"
+        "text-sm text-slate-500 font-mono mb-4"
     )
 
     records = db.get_media_by_profile(profile)
@@ -63,19 +63,19 @@ def build_browser(config_mgr, db):
     records, root_mismatch = filter_records(records, cfg)
 
     if not records:
-        with ui.card().classes("bg-gray-950 border border-cyan-800 rounded-lg p-6 w-full"):
-            ui.label("暂无媒体数据").classes("text-gray-500 font-mono")
-            ui.label("请先在 Sync 页面执行同步").classes("text-gray-600 font-mono text-sm mt-2")
+        with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-6 w-full"):
+            ui.label("暂无媒体数据").classes("text-slate-500 font-mono")
+            ui.label("请先在 Sync 页面执行同步").classes("text-slate-600 font-mono text-sm mt-2")
         return
 
     tag("browser-toolbar")
     if root_mismatch:
         ui.label(f"⚠ Root 不匹配任何记录，显示全部 {len(records)} 条").classes(
-            "text-sm text-yellow-400 font-mono mb-2")
+            "text-sm text-orange-400 font-mono mb-2")
     else:
         with ui.row().classes("w-full items-center gap-4 mb-4"):
             ui.label(f"共 {len(records)} 条记录").classes(
-                "text-sm text-gray-400 font-mono")
+                "text-sm text-slate-400 font-mono")
             ui.button("📷 加载封面", on_click=lambda: _load_covers(len(records), render_table)).classes(
                 "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono text-sm "
                 "border border-cyan-600 rounded px-4 py-1")
@@ -104,7 +104,7 @@ def _render_flat_table(records: list, table_schema: list[dict], db, load_covers:
 
     # 表头
     with ui.row().classes(
-        "w-full gap-2 py-2 border-b border-gray-700 text-xs text-gray-500 font-mono mb-2"
+        "w-full gap-2 py-2 border-b border-slate-700 text-xs text-slate-500 font-mono mb-2"
     ):
         ui.label("Cover").style("width: 86px;")
         ui.label("Title").style("flex: 2;")
@@ -118,7 +118,7 @@ def _render_flat_table(records: list, table_schema: list[dict], db, load_covers:
 
 def _render_media_row(item, table_schema: list[dict], db, load_covers: bool = False):
     """渲染单条媒体记录行。"""
-    with ui.row().classes("w-full gap-2 py-1 items-center hover:bg-gray-800 rounded"):
+    with ui.row().classes("w-full gap-2 py-1 items-center hover:bg-slate-800 rounded"):
 
         # 封面图：仅在 load_covers=True 时加载 BLOB
         if load_covers:
@@ -138,7 +138,7 @@ def _render_media_row(item, table_schema: list[dict], db, load_covers: bool = Fa
             _placeholder_cover()
 
         # 标题
-        ui.label(item["title"] or "—").classes("text-sm font-mono text-gray-200").style(
+        ui.label(item["title"] or "—").classes("text-sm font-mono text-slate-200").style(
             "flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
         )
 
@@ -148,11 +148,11 @@ def _render_media_row(item, table_schema: list[dict], db, load_covers: bool = Fa
             value = item[col_name] if col_name in item.keys() else None
             display = format_cell(value, col)
             cell = ui.label(display)
-            cell.classes("text-sm font-mono text-gray-400").style("flex: 1;")
+            cell.classes("text-sm font-mono text-slate-400").style("flex: 1;")
             if col_name in ("series", "director"):
                 cell.classes(
                     "text-sm font-mono text-cyan-400 underline cursor-pointer",
-                    remove="text-gray-400",
+                    remove="text-slate-400",
                 )
 
         # 截图按钮
@@ -163,7 +163,7 @@ def _render_shot_btn(mv_path: str, db):
     """渲染截图查看按钮，点击时临时加载截图数据。"""
     shot_cnt = db.get_screenshot_count(mv_path)
     if not shot_cnt:
-        ui.label("—").classes("text-xs text-gray-600 font-mono").style("width: 80px;")
+        ui.label("—").classes("text-xs text-slate-600 font-mono").style("width: 80px;")
         return
 
     def open_viewer():
@@ -174,16 +174,16 @@ def _render_shot_btn(mv_path: str, db):
             viewer_dlg.props("full-width")
             viewer_dlg.props("full-height")
             viewer_dlg.open()
-            with ui.card().classes("bg-gray-900 border border-cyan-700 rounded-lg p-4 w-full"):
+            with ui.card().classes("bg-slate-900 border border-cyan-700 rounded-lg p-4 w-full"):
                 with ui.row().classes("w-full justify-between items-center mb-3"):
                     ui.label(f"◆ {Path(mv_path).name}").classes(
                         "text-lg font-mono text-cyan-400"
                     )
                     ui.button("✕", on_click=lambda: viewer_dlg.close()).classes(
-                        "bg-gray-800 hover:bg-red-900 text-gray-400 font-mono text-xs border border-gray-700 rounded px-2 py-1"
+                        "bg-slate-800 hover:bg-red-900 text-slate-400 font-mono text-xs border border-slate-700 rounded px-2 py-1"
                     )
                 ui.label(f"共 {len(shots)} 张 · 点击图片放大").classes(
-                    "text-xs text-gray-500 font-mono mb-4"
+                    "text-xs text-slate-500 font-mono mb-4"
                 )
                 with ui.row().classes("flex-wrap gap-3 justify-center"):
                     for s in shots:
@@ -197,11 +197,11 @@ def _render_shot_btn(mv_path: str, db):
                                         zoom_dlg.props("full-width")
                                         zoom_dlg.props("full-height")
                                         zoom_dlg.open()
-                                        with ui.card().classes("bg-black border border-gray-700 rounded-lg p-2"):
+                                        with ui.card().classes("bg-slate-950 border border-slate-700 rounded-lg p-2"):
                                             with ui.row().classes("w-full justify-end mb-1"):
                                                 ui.button("✕", on_click=lambda: zoom_dlg.close()).classes(
-                                                    "bg-gray-900 hover:bg-red-900 text-gray-400 font-mono text-xs "
-                                                    "border border-gray-700 rounded px-2 py-1"
+                                                    "bg-slate-900 hover:bg-red-900 text-slate-400 font-mono text-xs "
+                                                    "border border-slate-700 rounded px-2 py-1"
                                                 )
                                             click_area = ui.element("div").classes("w-full h-full").style(
                                                 "cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;"
@@ -212,13 +212,13 @@ def _render_shot_btn(mv_path: str, db):
                                                     f'style="max-width:88vw;max-height:78vh;object-fit:contain;">'
                                                 )
                                                 ui.label(f"{lbl}（点任意处关闭）").classes(
-                                                    "text-xs font-mono text-gray-500 mt-2"
+                                                    "text-xs font-mono text-slate-500 mt-2"
                                                 )
                                             click_area.on("click", lambda: zoom_dlg.close())
                                 return open_zoom
 
                             with ui.card().classes(
-                                "bg-gray-800 border border-gray-700 rounded p-2 cursor-pointer "
+                                "bg-slate-800 border border-slate-700 rounded p-2 cursor-pointer "
                                 "hover:border-cyan-400 transition-colors"
                             ):
                                 ui.html(
@@ -227,7 +227,7 @@ def _render_shot_btn(mv_path: str, db):
                                     f'title="点击放大">'
                                 )
                                 ui.label(label).classes(
-                                    "text-xs text-gray-500 font-mono text-center mt-1"
+                                    "text-xs text-slate-500 font-mono text-center mt-1"
                                 )
                                 ui.button("🔍", on_click=_make_zoom()).classes(
                                     "bg-transparent hover:bg-cyan-900 text-cyan-400 text-xs "
@@ -237,8 +237,8 @@ def _render_shot_btn(mv_path: str, db):
                             pass
 
     btn = ui.button(f"📷 {shot_cnt}", on_click=open_viewer)
-    btn.classes("bg-gray-800 hover:bg-cyan-900 text-cyan-300 text-xs font-mono "
-                "border border-gray-700 rounded px-2 py-1")
+    btn.classes("bg-slate-800 hover:bg-cyan-900 text-cyan-300 text-xs font-mono "
+                "border border-slate-700 rounded px-2 py-1")
     btn.style("width: 80px;")
 
 

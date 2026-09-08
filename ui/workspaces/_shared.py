@@ -28,64 +28,64 @@ def build_config(config_mgr, registry):
 
     with ui.row().classes("gap-4 items-center mb-6"):
         tag("config-profile")
-        ui.label("切换 Profile:").classes("text-sm font-mono text-gray-400")
+        ui.label("切换 Profile:").classes("text-sm font-mono text-slate-400")
         profile_select = ui.select(
             options=config_mgr.list_profiles(),
             value=profile,
             on_change=lambda e: _on_profile_switch(e.value, config_mgr),
         )
-        profile_select.classes("bg-gray-700 text-cyan-100 font-mono")
+        profile_select.classes("bg-slate-700 text-cyan-100 font-mono")
         profile_select.style("min-width: 200px;")
         ui.label(f"显示名称: {cfg.get('name', '')}").classes(
-            "text-sm font-mono text-gray-500"
+            "text-sm font-mono text-slate-500"
         )
 
     ui.separator().classes("my-4 border-cyan-900")
 
     with ui.row().classes("gap-4 items-center w-full mb-4"):
         tag("config-paths")
-        ui.label("Root:").classes("text-sm font-mono text-gray-400 w-32")
+        ui.label("Root:").classes("text-sm font-mono text-slate-400 w-32")
         root_input = ui.input(value=cfg.get("root", ""), placeholder="D:/Media/Movies").classes(
-            "flex-1 bg-gray-700 text-gray-100 font-mono"
+            "flex-1 bg-slate-700 text-slate-100 font-mono"
         )
 
     with ui.row().classes("gap-4 items-center w-full mb-4"):
-        ui.label("From:").classes("text-sm font-mono text-gray-400 w-32")
+        ui.label("From:").classes("text-sm font-mono text-slate-400 w-32")
         from_input = ui.input(value=cfg.get("from", ""), placeholder="D:/Media/From").classes(
-            "flex-1 bg-gray-700 text-gray-100 font-mono"
+            "flex-1 bg-slate-700 text-slate-100 font-mono"
         )
 
     with ui.row().classes("gap-4 items-center w-full mb-4"):
-        ui.label("To:").classes("text-sm font-mono text-gray-400 w-32")
+        ui.label("To:").classes("text-sm font-mono text-slate-400 w-32")
         to_input = ui.input(value=cfg.get("to", ""), placeholder="D:/Media/To").classes(
-            "flex-1 bg-gray-700 text-gray-100 font-mono"
+            "flex-1 bg-slate-700 text-slate-100 font-mono"
         )
 
     tag("config-naming")
-    ui.label("命名规则 (Naming Rules):").classes("text-sm font-mono text-gray-400 mb-2")
+    ui.label("命名规则 (Naming Rules):").classes("text-sm font-mono text-slate-400 mb-2")
     rules_editor = (
         ui.textarea(value=json.dumps(cfg.get("naming_rules", {}), ensure_ascii=False, indent=2))
-        .classes("w-full bg-gray-700 text-yellow-100 font-mono text-sm")
+        .classes("w-full bg-slate-700 text-cyan-100 font-mono text-sm")
         .style("min-height: 100px;")
     )
 
     tag("config-schema")
-    ui.label("表结构 (Table Schema):").classes("text-sm font-mono text-gray-400 mt-4 mb-2")
+    ui.label("表结构 (Table Schema):").classes("text-sm font-mono text-slate-400 mt-4 mb-2")
     ui.label(
         "基础列 id/title/mv_path/cover/added_time 自动生成，此处仅定义扩展列。"
         "每项包含 name, type, label。"
-    ).classes("text-xs text-gray-600 font-mono mb-1")
+    ).classes("text-xs text-slate-600 font-mono mb-1")
     schema_editor = (
         ui.textarea(value=json.dumps(cfg.get("table_schema", []), ensure_ascii=False, indent=2))
-        .classes("w-full bg-gray-700 text-yellow-100 font-mono text-sm")
+        .classes("w-full bg-slate-700 text-cyan-100 font-mono text-sm")
         .style("min-height: 120px;")
     )
 
     tag("config-screenshot")
-    ui.label("截图配置 (Screenshot Config):").classes("text-sm font-mono text-gray-400 mt-4 mb-2")
+    ui.label("截图配置 (Screenshot Config):").classes("text-sm font-mono text-slate-400 mt-4 mb-2")
     ui.label(
         "count: 平均截取张数；moments: 指定视频时间点（秒）。moments 非空时忽略 count。"
-    ).classes("text-xs text-gray-600 font-mono mb-1")
+    ).classes("text-xs text-slate-600 font-mono mb-1")
     ss_editor = (
         ui.textarea(
             value=json.dumps(
@@ -93,15 +93,15 @@ def build_config(config_mgr, registry):
                 ensure_ascii=False, indent=2,
             )
         )
-        .classes("w-full bg-gray-700 text-yellow-100 font-mono text-sm")
+        .classes("w-full bg-slate-700 text-cyan-100 font-mono text-sm")
         .style("min-height: 80px;")
     )
 
     tag("config-extra")
-    ui.label("扩展配置 (Extra Config):").classes("text-sm font-mono text-gray-400 mt-4 mb-2")
+    ui.label("扩展配置 (Extra Config):").classes("text-sm font-mono text-slate-400 mt-4 mb-2")
     extra_editor = (
         ui.textarea(value=json.dumps(cfg.get("extra_config", {}), ensure_ascii=False, indent=2))
-        .classes("w-full bg-gray-700 text-yellow-100 font-mono text-sm")
+        .classes("w-full bg-slate-700 text-cyan-100 font-mono text-sm")
         .style("min-height: 80px;")
     )
 
@@ -119,8 +119,8 @@ def build_config(config_mgr, registry):
             "border border-cyan-600 rounded px-6 py-2"
         )
         ui.button("◇ 重置", on_click=lambda: switch_page("config")).classes(
-            "bg-gray-800 hover:bg-gray-700 text-gray-400 font-mono "
-            "border border-gray-600 rounded px-6 py-2"
+            "bg-slate-800 hover:bg-slate-700 text-slate-400 font-mono "
+            "border border-slate-600 rounded px-6 py-2"
         )
 
     status_label = ui.label("").classes("text-sm font-mono mt-4")
@@ -151,4 +151,4 @@ def _save_config(config_mgr, profile, root, from_path, to_path,
     )
     update_drawer_info()
     status_label.set_text("配置已保存 ✓")
-    status_label.classes("text-green-400 text-sm font-mono mt-4")
+    status_label.classes("text-blue-400 text-sm font-mono mt-4")

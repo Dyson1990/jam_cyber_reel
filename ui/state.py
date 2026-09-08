@@ -37,6 +37,7 @@ MENU_ITEMS = {
     "home": ("◇", "首页"),
     "browser": ("▤", "媒体浏览器"),
     "tools": ("◆", "工具"),
+    "overview": ("◈", "概览"),
     "config": ("⚙", "配置"),
     "sync": ("↻", "同步"),
 }
@@ -95,7 +96,7 @@ def switch_page(page: str):
     Args:
         page: 目标页面名称（home/config/sync/browser/tools）
     """
-    from ui.home import build_home
+    from ui.home import build_home, build_overview
     from ui.browser_page import build_browser
     from ui.tools_page import build_tools
     from ui.workspaces._shared import build_config
@@ -105,6 +106,8 @@ def switch_page(page: str):
     with content_area:
         if page == "home":
             build_home(config_mgr, db_instance)
+        elif page == "overview":
+            build_overview(config_mgr, db_instance)
         elif page == "config":
             build_config(config_mgr, registry)
         elif page == "sync":
@@ -126,14 +129,15 @@ def render_workspace_menu():
     workspace_menu_container.clear()
     key = workspace_of(config_mgr.current_profile)
     with workspace_menu_container:
-        for page in workspace_menu(key):
+        # 概览固定为每个工作区的首个入口
+        for page in ["overview", *workspace_menu(key)]:
             icon, label = MENU_ITEMS[page]
             btn = ui.button(
                 f"{icon}  {label}",
                 on_click=lambda _, p=page: switch_page(p),
             )
             btn.classes(
-                "w-full text-left bg-gray-900 hover:bg-cyan-900 text-cyan-300 "
+                "w-full text-left bg-slate-950 hover:bg-cyan-900 text-cyan-300 "
                 "border border-cyan-800 rounded font-mono text-sm py-2 "
                 "transition-colors duration-200"
             )
@@ -145,7 +149,7 @@ def switch_workspace(key: str):
     config_mgr.current_profile = workspace_default_profile(key)
     render_workspace_menu()
     update_drawer_info()
-    switch_page("home")
+    switch_page("overview")
 
 
 def update_drawer_info():

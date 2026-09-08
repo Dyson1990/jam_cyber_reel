@@ -21,16 +21,16 @@ def create_layout(cfg_mgr, db, prof_registry):
     state.registry = prof_registry
 
     # 页面头部
-    with ui.header(elevated=True).classes("bg-gray-900 text-cyan-400"):
-        ui.label("◆ CYBERREEL").classes("text-2xl font-mono tracking-widest glow-text")
+    with ui.header(elevated=True).classes("text-cyan-400"):
+        ui.label("◆ CYBERREEL").classes("text-3xl font-mono tracking-widest neon-title")
 
     # 左侧抽屉菜单
-    with ui.left_drawer(fixed=False).classes("bg-gray-950 border-r border-cyan-800") as drawer:
+    with ui.left_drawer(fixed=False).classes("border-r border-cyan-800") as drawer:
         drawer.style("width: 240px;")
         with ui.column().classes("p-4 w-full gap-2"):
             # ① CURRENT PROFILE
             state.tag("drawer-profile")
-            ui.label("CURRENT PROFILE").classes("text-xs text-gray-500 font-mono")
+            ui.label("CURRENT PROFILE").classes("text-xs text-slate-500 font-mono")
             state.workspace_radio = ui.radio(
                 {key: ws["label"] for key, ws in WORKSPACES.items()},
                 value=workspace_of(cfg_mgr.current_profile),
@@ -38,7 +38,7 @@ def create_layout(cfg_mgr, db, prof_registry):
             ).props("inline").classes("mb-2 text-cyan-300")
             state.profile_label = ui.label("—").classes("text-magenta-400 text-sm font-mono")
             with ui.row().classes("items-center gap-2 mt-2 w-full"):
-                ui.label("ROOT").classes("text-xs text-gray-500 font-mono")
+                ui.label("ROOT").classes("text-xs text-slate-500 font-mono")
                 _root_edit_button(cfg_mgr)
             state.root_label = ui.label("/").classes("text-cyan-400 text-sm font-mono truncate w-full")
 
@@ -46,7 +46,7 @@ def create_layout(cfg_mgr, db, prof_registry):
 
             # ② 常用选项
             state.tag("drawer-common")
-            ui.label("COMMON").classes("text-xs text-gray-600 font-mono")
+            ui.label("COMMON").classes("text-xs text-slate-600 font-mono")
             for icon, label, page in [
                 ("◇", "首页", "home"),
                 ("▤", "媒体浏览器", "browser"),
@@ -58,16 +58,16 @@ def create_layout(cfg_mgr, db, prof_registry):
 
             # ③ 专用选项（随业务域变化）
             state.tag("drawer-specialized")
-            ui.label("SPECIALIZED").classes("text-xs text-gray-600 font-mono")
+            ui.label("SPECIALIZED").classes("text-xs text-slate-600 font-mono")
             state.workspace_menu_container = ui.column().classes("w-full gap-2")
             state.render_workspace_menu()
 
             ui.separator().classes("my-2 border-cyan-900")
 
             # ④ 状态栏
-            with ui.card().classes("bg-gray-800 border border-cyan-900 rounded p-2 w-full"):
+            with ui.card().classes("bg-slate-800 border border-cyan-900 rounded p-2 w-full"):
                 state.tag("drawer-status")
-                ui.label("STATUS").classes("text-xs text-gray-500 font-mono")
+                ui.label("STATUS").classes("text-xs text-slate-500 font-mono")
                 state.status_text = ui.label("就绪").classes(
                     "text-xs text-cyan-300 font-mono mt-1"
                 )
@@ -82,10 +82,10 @@ def create_layout(cfg_mgr, db, prof_registry):
                 )
 
             ui.separator().classes("my-2 border-cyan-900")
-            ui.label("v1.0.0").classes("text-xs text-gray-600 font-mono mt-auto")
+            ui.label("v1.0.0").classes("text-xs text-slate-600 font-mono mt-auto")
 
     # 右侧内容区
-    state.content_area = ui.column().classes("w-full p-6 bg-gray-900 min-h-screen")
+    state.content_area = ui.column().classes("w-full p-6 min-h-screen")
 
     # 启动时默认显示首页
     state.switch_page("home")
@@ -96,7 +96,7 @@ def _menu_button(icon: str, label: str, page: str):
     """渲染一个左侧菜单按钮。"""
     btn = ui.button(f"{icon}  {label}", on_click=lambda _, p=page: state.switch_page(p))
     btn.classes(
-        "w-full text-left bg-gray-900 hover:bg-cyan-900 text-cyan-300 "
+        "w-full text-left bg-slate-950 hover:bg-cyan-900 text-cyan-300 "
         "border border-cyan-800 rounded font-mono text-sm py-2 "
         "transition-colors duration-200"
     )

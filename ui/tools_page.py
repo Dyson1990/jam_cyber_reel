@@ -33,14 +33,14 @@ def build_tools(config_mgr, db):
     ui.label("◆ TOOLS").classes("text-xl font-mono text-cyan-400 mb-6 glow-text")
 
     if not scripts:
-        ui.label("tools/ 目录下暂无脚本").classes("text-gray-500 font-mono")
+        ui.label("tools/ 目录下暂无脚本").classes("text-slate-500 font-mono")
         return
 
     with ui.row().classes("w-full gap-4"):
         # 左侧：脚本列表
         with ui.column().classes("gap-2").style("width: 200px;"):
             tag("script-list")
-            ui.label("脚本列表").classes("text-xs text-gray-500 font-mono mb-2")
+            ui.label("脚本列表").classes("text-xs text-slate-500 font-mono mb-2")
             selected_script = {"path": scripts[0]}  # 用 dict 保存可变引用
 
             for script in scripts:
@@ -52,7 +52,7 @@ def build_tools(config_mgr, db):
                     ),
                 )
                 btn.classes(
-                    "w-full text-left bg-gray-900 hover:bg-cyan-900 text-cyan-300 "
+                    "w-full text-left bg-slate-900 hover:bg-cyan-900 text-cyan-300 "
                     "border border-cyan-800 rounded font-mono text-xs py-1 px-3"
                 )
                 btn.style("justify-content: flex-start;")
@@ -66,12 +66,12 @@ def build_tools(config_mgr, db):
                 .tools-dark-textarea textarea,
                 .tools-dark-input .q-field__native,
                 .tools-dark-input input {
-                    background: #000 !important;
+                    background: #0f172a !important;
                     color: #ddd !important;
                 }
                 .tools-dark-textarea .q-field__control,
                 .tools-dark-input .q-field__control {
-                    background: #000 !important;
+                    background: #0f172a !important;
                     border-color: #333 !important;
                 }
             </style>
@@ -79,7 +79,7 @@ def build_tools(config_mgr, db):
 
             # 源码区
             tag("script-source")
-            ui.label("源码").classes("text-xs text-gray-500 font-mono")
+            ui.label("源码").classes("text-xs text-slate-500 font-mono")
             source_area = (
                 ui.textarea(value="")
                 .classes("w-full font-mono text-xs tools-dark-textarea")
@@ -88,7 +88,7 @@ def build_tools(config_mgr, db):
 
             # 参数区
             tag("script-args")
-            ui.label("参数（留空则使用 Profile 的 root 路径）").classes("text-xs text-gray-500 font-mono")
+            ui.label("参数（留空则使用 Profile 的 root 路径）").classes("text-xs text-slate-500 font-mono")
             args_input = (
                 ui.input(value="", placeholder="路径或参数，空格分隔")
                 .classes("w-full font-mono text-xs tools-dark-input")
@@ -114,13 +114,13 @@ def build_tools(config_mgr, db):
                     on_click=lambda: _copy_output(output_area),
                 )
                 copy_btn.classes(
-                    "bg-gray-800 hover:bg-gray-700 text-gray-300 font-mono "
-                    "border border-gray-600 rounded px-4 py-1 text-sm"
+                    "bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono "
+                    "border border-slate-600 rounded px-4 py-1 text-sm"
                 )
 
             # 运行结果区
             tag("script-output")
-            ui.label("运行结果").classes("text-xs text-gray-500 font-mono mt-2")
+            ui.label("运行结果").classes("text-xs text-slate-500 font-mono mt-2")
             output_area = (
                 ui.textarea(value="")
                 .classes("w-full font-mono text-xs tools-dark-textarea")
