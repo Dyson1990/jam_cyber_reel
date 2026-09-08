@@ -4,10 +4,11 @@
     "movie": {
       "name": "电影",
       "root": "\\\\TRUENAS\\rust_bytes：电影",
-      "naming_rules": {
-        "当幸福来敲门.The_Pursuit_of_Happyness.2006.BluRay.1080p.x265.10bit.无字幕.mkv": "当幸福来敲门1111.The_Pursuit_of_Happyness.2006.BluRay.1080p.x265.10bit.无字幕.mkv"
-      },
+      "from": "\\\\TRUENAS\\rust_bytes：电影\\new",
+      "to": "\\\\TRUENAS\\rust_bytes：电影\\standardized",
+      "naming_rules": {},
       "extra_config": {},
+      "crid_pattern": "",
       "screenshot_config": {
         "count": 3,
         "moments": []
@@ -43,15 +44,16 @@
           "type": "TEXT",
           "label": "分辨率"
         }
-      ],
-      "from": "\\\\TRUENAS\\rust_bytes：电影\\new",
-      "to": "\\\\TRUENAS\\rust_bytes：电影\\standardized"
+      ]
     },
     "tv": {
       "name": "电视剧",
       "root": "\\\\TRUENAS\\rust_bytes：美剧",
+      "from": "",
+      "to": "",
       "naming_rules": {},
       "extra_config": {},
+      "crid_pattern": "",
       "screenshot_config": {
         "count": 3,
         "moments": []
@@ -87,15 +89,16 @@
           "type": "TEXT",
           "label": "分辨率"
         }
-      ],
-      "from": "",
-      "to": ""
+      ]
     },
     "realshot": {
       "name": "实拍",
       "root": "",
+      "from": "",
+      "to": "",
       "naming_rules": {},
       "extra_config": {},
+      "crid_pattern": "",
       "screenshot_config": {
         "count": 2,
         "moments": []
@@ -126,11 +129,14 @@
     "homework": {
       "name": "Homework",
       "root": "",
+      "from": "",
+      "to": "",
       "naming_rules": {
         "pattern": "^(.*?)[\\-_\\.\\s]+(.*)$",
         "replacement": "\\1 - \\2"
       },
       "extra_config": {},
+      "crid_pattern": "",
       "screenshot_config": {
         "count": 2,
         "moments": []

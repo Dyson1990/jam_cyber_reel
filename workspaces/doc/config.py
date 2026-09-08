@@ -1,22 +1,20 @@
-"""练习业务 — 默认 Profile 配置（homework）。"""
+"""纪实业务 — 默认 Profile 配置（realshot）。"""
 
 PROFILES = {
-    "homework": {
-        "name": "Homework",
+    "realshot": {
+        "name": "实拍",
         "root": "",
         "from": "",
         "to": "",
-        "naming_rules": {
-            "pattern": r"^(.*?)[\-_\.\s]+(.*)$",
-            "replacement": r"\1 - \2",
-        },
+        "naming_rules": {},
         "extra_config": {},
         "crid_pattern": "",
         "screenshot_config": {"count": 2, "moments": []},
         "table_schema": [
-            {"name": "series", "type": "TEXT", "label": "课程编号"},
             {"name": "file_size", "type": "INTEGER", "label": "文件大小"},
             {"name": "duration", "type": "REAL", "label": "时长"},
+            {"name": "codec", "type": "TEXT", "label": "编码"},
+            {"name": "resolution", "type": "TEXT", "label": "分辨率"},
         ],
     },
 }

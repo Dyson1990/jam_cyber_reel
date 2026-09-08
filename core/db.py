@@ -106,8 +106,7 @@ class Database:
         """创建共享表。
 
         设计理由：
-            使用 IF NOT EXISTS，支持重复调用而不会出错，
-            便于 create_test_db.py 和 main.py 均可安全调用。
+            使用 IF NOT EXISTS，支持重复调用而不会出错。
 
         media_{profile} 表由 create_media_table() 按需创建。
         """

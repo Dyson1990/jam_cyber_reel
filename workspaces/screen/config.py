@@ -1,2 +1,40 @@
-"""影视业务 — 配置后端（复用共享实现）。"""
-from workspaces._shared import save_config, parse_table_schema, parse_naming_rules
+"""影视业务 — 默认 Profile 配置（movie / tv）。"""
+
+PROFILES = {
+    "movie": {
+        "name": "电影",
+        "root": "",
+        "from": "",
+        "to": "",
+        "naming_rules": {},
+        "extra_config": {},
+        "crid_pattern": "",
+        "screenshot_config": {"count": 3, "moments": []},
+        "table_schema": [
+            {"name": "director", "type": "TEXT", "label": "导演"},
+            {"name": "year", "type": "INTEGER", "label": "年份"},
+            {"name": "file_size", "type": "INTEGER", "label": "文件大小"},
+            {"name": "duration", "type": "REAL", "label": "时长"},
+            {"name": "codec", "type": "TEXT", "label": "编码"},
+            {"name": "resolution", "type": "TEXT", "label": "分辨率"},
+        ],
+    },
+    "tv": {
+        "name": "电视剧",
+        "root": "",
+        "from": "",
+        "to": "",
+        "naming_rules": {},
+        "extra_config": {},
+        "crid_pattern": "",
+        "screenshot_config": {"count": 3, "moments": []},
+        "table_schema": [
+            {"name": "series", "type": "TEXT", "label": "系列"},
+            {"name": "year", "type": "INTEGER", "label": "年份"},
+            {"name": "file_size", "type": "INTEGER", "label": "文件大小"},
+            {"name": "duration", "type": "REAL", "label": "时长"},
+            {"name": "codec", "type": "TEXT", "label": "编码"},
+            {"name": "resolution", "type": "TEXT", "label": "分辨率"},
+        ],
+    },
+}

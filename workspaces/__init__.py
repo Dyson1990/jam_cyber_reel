@@ -9,6 +9,13 @@ Workspaces — 专用选项后端。
 每个 workspace 定义默认 profile、可切换 profiles、以及专用菜单项。
 """
 
+from workspaces.screen.config import PROFILES as _SCREEN_PROFILES
+from workspaces.doc.config import PROFILES as _DOC_PROFILES
+from workspaces.lab.config import PROFILES as _LAB_PROFILES
+
+# 各 workspace 定义的默认 Profile 配置，config_manager 以此作为 schema 单一来源
+PROFILE_DEFAULTS = {**_SCREEN_PROFILES, **_DOC_PROFILES, **_LAB_PROFILES}
+
 WORKSPACES = {
     "screen": {
         "label": "影视",

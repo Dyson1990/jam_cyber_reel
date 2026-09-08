@@ -18,9 +18,12 @@
     Profile handler ← ConfigManager.get_profile_config()
 """
 
+import copy
 import json
 from pathlib import Path
 from typing import Optional
+
+from workspaces import PROFILE_DEFAULTS
 
 
 class ConfigManager:
@@ -42,15 +45,21 @@ class ConfigManager:
         self._data: dict = self._load()
 
     def _load(self) -> dict:
-        """从磁盘加载配置，文件不存在则返回默认结构。
+        """加载配置：默认结构为基底，磁盘存储的覆盖值合并其上。
+
+        设计理由：
+            默认 schema 由各 workspace 的 PROFILE_DEFAULTS 定义（单一来源），
+            JSON 仅存用户运行时覆盖（root/from/to/naming_rules 等）。
+            合并后，即使旧 JSON 缺失新字段（如 crid_pattern）也会被补齐。
 
         Returns:
             配置字典
         """
+        data = self._default_config()
         if self.config_path.exists():
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    self._merge_stored(data, json.load(f))
             except (json.JSONDecodeError, OSError):
                 # 备份损坏文件，避免后续 save() 覆盖前丢失原配置
                 try:
@@ -58,90 +67,26 @@ class ConfigManager:
                     bak.write_bytes(self.config_path.read_bytes())
                 except OSError:
                     pass
-        return self._default_config()
+        return data
+
+    @staticmethod
+    def _merge_stored(data: dict, stored: dict) -> None:
+        """将存储值合并进默认结构：按 profile 浅合并，仅覆盖存储中出现的键。"""
+        defaults = data["profiles"]
+        for name, cfg in stored.get("profiles", {}).items():
+            defaults.setdefault(name, {}).update(cfg)
+        if "current_profile" in stored:
+            data["current_profile"] = stored["current_profile"]
 
     def _default_config(self) -> dict:
-        """生成默认配置结构。
-
-        设计理由：
-            内置 4 个 Profile 的默认配置，
-            用户首次启动即可使用，无需手动创建。
+        """生成默认配置结构（schema 来自各 workspace 的 PROFILE_DEFAULTS）。
 
         Returns:
             默认配置字典
         """
         return {
             "current_profile": "movie",
-            "profiles": {
-                "movie": {
-                    "name": "电影",
-                    "root": "",
-                    "from": "",
-                    "to": "",
-                    "naming_rules": {},
-                    "extra_config": {},
-                    "crid_pattern": "",
-                    "screenshot_config": {"count": 3, "moments": []},
-                    "table_schema": [
-                        {"name": "director", "type": "TEXT", "label": "导演"},
-                        {"name": "year", "type": "INTEGER", "label": "年份"},
-                        {"name": "file_size", "type": "INTEGER", "label": "文件大小"},
-                        {"name": "duration", "type": "REAL", "label": "时长"},
-                        {"name": "codec", "type": "TEXT", "label": "编码"},
-                        {"name": "resolution", "type": "TEXT", "label": "分辨率"},
-                    ],
-                },
-                "tv": {
-                    "name": "电视剧",
-                    "root": "",
-                    "from": "",
-                    "to": "",
-                    "naming_rules": {},
-                    "extra_config": {},
-                    "crid_pattern": "",
-                    "screenshot_config": {"count": 3, "moments": []},
-                    "table_schema": [
-                        {"name": "series", "type": "TEXT", "label": "系列"},
-                        {"name": "year", "type": "INTEGER", "label": "年份"},
-                        {"name": "file_size", "type": "INTEGER", "label": "文件大小"},
-                        {"name": "duration", "type": "REAL", "label": "时长"},
-                        {"name": "codec", "type": "TEXT", "label": "编码"},
-                        {"name": "resolution", "type": "TEXT", "label": "分辨率"},
-                    ],
-                },
-                "realshot": {
-                    "name": "实拍",
-                    "root": "",
-                    "from": "",
-                    "to": "",
-                    "naming_rules": {},
-                    "extra_config": {},
-                    "screenshot_config": {"count": 2, "moments": []},
-                    "table_schema": [
-                        {"name": "file_size", "type": "INTEGER", "label": "文件大小"},
-                        {"name": "duration", "type": "REAL", "label": "时长"},
-                        {"name": "codec", "type": "TEXT", "label": "编码"},
-                        {"name": "resolution", "type": "TEXT", "label": "分辨率"},
-                    ],
-                },
-                "homework": {
-                    "name": "Homework",
-                    "root": "",
-                    "from": "",
-                    "to": "",
-                    "naming_rules": {
-                        "pattern": r"^(.*?)[\-_\.\s]+(.*)$",
-                        "replacement": r"\1 - \2",
-                    },
-                    "extra_config": {},
-                    "screenshot_config": {"count": 2, "moments": []},
-                    "table_schema": [
-                        {"name": "series", "type": "TEXT", "label": "课程编号"},
-                        {"name": "file_size", "type": "INTEGER", "label": "文件大小"},
-                        {"name": "duration", "type": "REAL", "label": "时长"},
-                    ],
-                },
-            },
+            "profiles": copy.deepcopy(PROFILE_DEFAULTS),
         }
 
     def save(self) -> None:
