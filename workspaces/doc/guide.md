@@ -13,6 +13,13 @@
 ## 前端文件（ui/workspaces/doc/）
 - `__init__.py` — 前端标识（暂无页面）
 
+## Profile 插件
+realshot 无自定义逻辑，`ProfileRegistry.discover()` 回退默认 `ProfileBase`
+（dict 映射改名，行为由 config 的 `naming_rules` 决定）。
+
+如需实拍特有逻辑，在 `workspaces/doc/` 新建 `profile.py`，定义继承 `ProfileBase`
+的 handler 并声明 `profile_name = "realshot"` 即可，注册代码无需改动。
+
 ## 新增专用功能的方法
 1. 在 `workspaces/__init__.py` 的 `WORKSPACES["doc"]["menu"]` 中加入页面 key（如 `"sync"`）
 2. 在 `workspaces/doc/` 实现对应后端逻辑

@@ -12,6 +12,9 @@ import re
 from pathlib import Path
 
 from core.files import scan_videos, VIDEO_EXTENSIONS
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def diff_db(
@@ -33,6 +36,10 @@ def diff_db(
     }
     added = [disk_map[k] for k in disk_map if k not in db_map]
     removed = [db_map[k] for k in db_map if k not in disk_map]
+    logger.info(
+        "diff_db profile=%s 新增=%d 移除=%d 保持不变=%d",
+        profile_name, len(added), len(removed), len(set(disk_map) & set(db_map)),
+    )
     return {
         "added": sorted(added, key=lambda p: p.name),
         "removed": sorted(removed),
@@ -63,6 +70,7 @@ def sync_db(
                 crid=crid,
             )
             count += 1
+    logger.info("sync_db profile=%s 写入 %d 条", profile_name, count)
     return count
 
 
@@ -95,4 +103,5 @@ def build_db(root: str, db, profile_name: str) -> int:
             mv_path=str(f), file_size=f.stat().st_size,
         )
         count += 1
+    logger.info("build_db profile=%s 写入 %d 条", profile_name, count)
     return count

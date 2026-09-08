@@ -20,6 +20,13 @@
 ## 专用菜单
 配置（config）、同步（sync）
 
+## Profile 插件
+movie / tv 无自定义逻辑，`ProfileRegistry.discover()` 回退默认 `ProfileBase`
+（dict 映射改名，行为由 config 的 `naming_rules` 决定）。
+
+如需影视特有逻辑，在 `workspaces/screen/` 新建 `profile.py`，定义继承 `ProfileBase`
+的 handler 并声明 `profile_name`（`"movie"` / `"tv"`）即可，注册代码无需改动。
+
 ## 依赖的 core 模块
 - `core/sync.py` — 数据库同步
 - `core/files.py` — 文件扫描 / 重命名 / 回滚

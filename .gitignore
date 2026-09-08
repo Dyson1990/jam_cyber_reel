@@ -7,6 +7,9 @@
 *.db
 *.db-journal
 
+# Logs (含轮转文件 app.log.YYYY-MM-DD)
+logs/
+
 # OS
 .DS_Store
 Thumbs.db

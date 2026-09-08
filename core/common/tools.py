@@ -5,6 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _TOOLS_DIR = _PROJECT_ROOT / "tools"
 
@@ -38,8 +42,10 @@ def run_script(script_path: Path, config_mgr, user_args: str = "") -> str:
             encoding="utf-8", errors="replace", env=env, cwd=str(_PROJECT_ROOT),
         )
     except subprocess.TimeoutExpired:
+        logger.error("脚本超时: %s", script_path.name)
         return "运行超时（30秒）"
     except Exception as e:
+        logger.exception("脚本运行失败: %s", script_path.name)
         return f"运行失败: {e}"
 
     output = result.stdout

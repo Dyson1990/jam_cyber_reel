@@ -28,10 +28,13 @@ from pathlib import Path
 
 from nicegui import ui
 
+from core.logging_config import get_logger
 from ui.state import update_drawer_info, tag
 from core.screenshots import capture_one_video
 from core.common.browser import get_relative_exclude_dirs
 from ui.state import clear_cancel, cancel_requested
+
+logger = get_logger(__name__)
 
 
 # 模块级共享日志容器引用（build_sync 中赋值，页面切换时自动重建）
@@ -292,6 +295,7 @@ async def _run_db_diff(handler, exclude_dirs):
             exclude_dirs=exclude_dirs if exclude_dirs else None,
         )
     except Exception as e:
+        logger.exception("对比数据库差异失败 profile=%s", handler.profile_name)
         _log(f"  对比失败: {e}", "red")
         _set_ready()
         return
@@ -366,6 +370,7 @@ async def _run_db_sync(handler, exclude_dirs, crid_pattern: str = ""):
                 "yellow",
             )
     except Exception as e:
+        logger.exception("数据库同步失败 profile=%s", handler.profile_name)
         _log(f"  数据库同步失败: {e}", "red")
         _set_ready()
         return
@@ -445,9 +450,11 @@ async def _run_capture_screenshots(handler):
                     timeout=VIDEO_TIMEOUT,
                 )
             except asyncio.TimeoutError:
+                logger.warning("截图超时: %s", mv_path)
                 _log(f"  {name}: 超时（>{VIDEO_TIMEOUT}s）", "red")
                 continue
             except Exception as e:
+                logger.exception("截图失败: %s", mv_path)
                 _log(f"  {name}: 失败 - {e}", "red")
                 continue
 
@@ -465,6 +472,7 @@ async def _run_capture_screenshots(handler):
         _log(f"◆ 截图采集完成: 共 {total} 张 ✓", "cyan")
     except Exception as e:
         import traceback
+        logger.exception("截图采集异常 profile=%s", handler.profile_name)
         _log(f"◆ 截图采集异常: {e}", "red")
         _log(traceback.format_exc(), "red")
     finally:
@@ -515,6 +523,7 @@ async def _run_rename(handler):
         files = await asyncio.to_thread(handler.scan, root_override=from_dir)
         _log(f"  scan: 在 {from_dir} 中发现 {len(files)} 个视频文件", "gray")
     except Exception as e:
+        logger.exception("scan 失败 from=%s", from_dir)
         _log(f"  scan 失败: {e}", "red")
         _set_ready()
         return
@@ -549,6 +558,7 @@ async def _run_rename(handler):
         if shown == 0:
             _log("    (所有文件名已符合规范)", "gray")
     except Exception as e:
+        logger.exception("normalize 失败 profile=%s", handler.profile_name)
         _log(f"  normalize 失败: {e}", "red")
         _set_ready()
         return
@@ -582,6 +592,7 @@ async def _run_rename(handler):
                     "red",
                 )
     except Exception as e:
+        logger.exception("rename 失败 profile=%s", handler.profile_name)
         _log(f"  rename 失败: {e}", "red")
         _set_ready()
         return
@@ -615,6 +626,7 @@ async def _run_rollback_batch(handler):
         )
         _log_batch_results(results)
     except Exception as e:
+        logger.exception("回滚上一批失败 profile=%s", handler.profile_name)
         _log(f"  回滚失败: {e}", "red")
     _set_ready()
 
@@ -642,6 +654,7 @@ async def _run_rollback_range(handler, date_from, date_to):
         )
         _log_batch_results(results)
     except Exception as e:
+        logger.exception("批量回滚失败 profile=%s", handler.profile_name)
         _log(f"  回滚失败: {e}", "red")
     _set_ready()
 

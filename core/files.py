@@ -6,6 +6,10 @@ import os
 import uuid
 from pathlib import Path
 
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".ts"}
 
 
@@ -113,6 +117,11 @@ def rename_files(
             "old_name": old_path.name, "new_name": actual_name,
             "path": str(dest_dir), "status": "成功",
         })
+    ok = sum(1 for r in records if r["status"] == "成功")
+    fail = len(records) - ok
+    logger.info("rename_files batch=%s 成功=%d 失败=%d", batch_id, ok, fail)
+    if fail:
+        logger.warning("rename_files batch=%s 有 %d 条失败", batch_id, fail)
     return records
 
 
@@ -162,4 +171,7 @@ def rollback_records(records: list, db, source_dir: Path | None = None) -> list[
                 "old_name": rec["new_name"], "new_name": rec["old_name"],
                 "path": str(orig_dir), "status": "文件已不存在，记录已清除",
             })
+    rolled = sum(1 for r in results if "已回滚" in r.get("status", ""))
+    failed = sum(1 for r in results if "失败" in r.get("status", ""))
+    logger.info("rollback_records 已回滚=%d 失败=%d", rolled, failed)
     return results

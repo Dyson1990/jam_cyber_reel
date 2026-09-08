@@ -18,6 +18,10 @@ import time as _time
 from pathlib import Path
 from typing import Callable, Optional
 
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 # ==================== 纯函数（无需 DB，可直接测试） ====================
 
@@ -293,11 +297,13 @@ def capture_one_video(
         return {"mv_path": mv_path, "status": f"已有 {existing} 张（上限 {count}）", "count": 0}
 
     if not Path(mv_path).exists():
+        logger.warning("截图文件不存在: %s", mv_path)
         return {"mv_path": mv_path, "status": "文件不存在", "count": 0}
 
     try:
         time_points, duration = resolve_time_points(mv_path, count, moments, cancel_fn=cancel_fn)
     except Exception as e:
+        logger.warning("无法打开视频 %s: %s", mv_path, e)
         return {"mv_path": mv_path, "status": f"无法打开视频: {e}", "count": 0}
 
     if cancel_fn and cancel_fn():
@@ -332,6 +338,7 @@ def capture_one_video(
 
     # 全部失败时给出诊断信息
     if captured == 0 and failed_tps:
+        logger.warning("截图全失败: %s", mv_path)
         diag = diagnose_video(mv_path)
         if diag["error"]:
             result["status"] = (

@@ -7,7 +7,8 @@ from nicegui import ui
 
 from config_manager import ConfigManager
 from core.db import Database
-from profiles import ProfileRegistry
+from core.logging_config import setup_logging, install_excepthook, get_logger
+from workspaces._shared import ProfileRegistry
 from ui.layout import create_layout
 import ui.state as state
 
@@ -94,13 +95,21 @@ body::after {
 
 BASE = Path(__file__).parent
 
+# 日志系统必须最先初始化，确保后续模块的 logger 都能落到根 handler
+setup_logging(BASE / "logs")
+install_excepthook()
+logger = get_logger("main")
+
+logger.info("CyberReel 启动")
+
 config_mgr = ConfigManager(BASE / "profiles_config.json")
 db = Database(BASE / "data.db")
 db.create_tables()
 db.ensure_all_media_tables(config_mgr)
 
-registry = ProfileRegistry(BASE / "profiles", db, config_mgr)
+registry = ProfileRegistry(db, config_mgr)
 registry.discover()
+logger.info("已加载 %d 个 Profile handler", registry.handler_count)
 
 # -testing-env 启动参数：区域名标签改为白色可见，便于定位调试
 if "-testing-env" in sys.argv:

@@ -13,6 +13,7 @@
 from nicegui import ui
 
 from core.common.dashboard import get_workspace_overview, get_changelog
+from core.logging_config import read_recent_logs
 from ui.state import tag
 
 
@@ -21,11 +22,30 @@ def build_home(config_mgr, db):
     tag("home")
     ui.label("◆ HOME").classes("text-xl font-mono text-cyan-400 mb-6 glow-text")
 
-    # 最新运行日志（日志系统后续接入，先占位）
+    # 最新运行日志：定时读取 logs/ 目录末尾，实时刷新
     with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-4 w-full mb-4"):
         tag("run-log")
-        ui.label("◆ 运行日志").classes("text-lg font-mono text-cyan-400 mb-2")
-        ui.label("日志系统尚未接入，敬请期待。").classes("text-sm text-slate-500 font-mono")
+        with ui.row().classes("w-full items-center justify-between mb-2"):
+            ui.label("◆ 运行日志").classes("text-lg font-mono text-cyan-400")
+            ui.label("每 3 秒自动刷新").classes("text-xs text-slate-600 font-mono")
+        log_area = ui.column().classes("font-mono text-xs w-full overflow-y-auto").style(
+            "max-height: 320px;"
+        )
+
+        def _refresh():
+            log_area.clear()
+            with log_area:
+                lines = read_recent_logs(100)
+                if not lines:
+                    ui.label("暂无日志（启动后自动记录）").classes(
+                        "text-slate-600 font-mono"
+                    )
+                    return
+                for ln in lines:
+                    ui.label(ln).classes(_line_color(ln))
+
+        _refresh()
+        ui.timer(3.0, _refresh)
 
     # 更新日志
     with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-4 w-full"):
@@ -33,6 +53,19 @@ def build_home(config_mgr, db):
         ui.label("◆ 更新日志").classes("text-lg font-mono text-cyan-400 mb-2")
         for entry in get_changelog():
             ui.label(f"• {entry}").classes("text-sm font-mono text-slate-300 mt-1")
+
+
+def _line_color(line: str) -> str:
+    """按日志级别给运行日志行着色。"""
+    parts = line.split(" | ")
+    level = parts[1].strip() if len(parts) > 1 else ""
+    if level in ("ERROR", "CRITICAL"):
+        return "text-red-400"
+    if level == "WARNING":
+        return "text-orange-400"
+    if level == "INFO":
+        return "text-slate-300"
+    return "text-slate-500"
 
 
 def build_overview(config_mgr, db):

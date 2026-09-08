@@ -1,22 +1,24 @@
 """
-Homework Profile - regex 方式 normalize()。
+练习业务（lab）— homework Profile 插件。
 
-与 Movie/TV/RealShot 不同，Homework 使用正则表达式进行文件名规范化。
-naming_rules 格式：{"pattern": "...", "replacement": "..."}
+区别于 movie/tv/realshot 的默认 dict 字符串替换，homework 使用 regex 规范化文件名，
+并额外从文件名提取课程编号作为 series 列。
+
+通过继承 ProfileBase 并声明 profile_name="homework" 注册为插件，
+由 ProfileRegistry.discover() 自动加载；其余 profile 无自定义逻辑，回退默认 ProfileBase。
 """
 
 import re
 from pathlib import Path
 
-from profiles import ProfileBase
 from core.files import VIDEO_EXTENSIONS
+from workspaces._shared import ProfileBase
 
 
 class HomeworkHandler(ProfileBase):
-    """Homework 媒体处理器 —— regex 替换规范化文件名。
+    """Homework 媒体处理器 —— regex 替换规范化文件名 + 提取课程编号。"""
 
-    naming_rules 中 pattern/replacement 为空时保留原名。
-    """
+    profile_name = "homework"
 
     def normalize(self, files: list[Path]) -> dict[Path, str]:
         naming_rules = self.config.get("naming_rules", {})

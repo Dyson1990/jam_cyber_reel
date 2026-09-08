@@ -6,9 +6,8 @@
     core/sync.py            — _extract_crid / diff_db / build_db
     core/files.py           — scan_videos / rename_files / rollback_records
     core/screenshots.py     — format_time_label
-    profiles/__init__.py    — _apply_rules
-    profiles/homework/handler.py — HomeworkHandler.normalize
-    workspaces/_shared.py   — parse_naming_rules / parse_table_schema / save_config
+    workspaces/_shared.py   — _apply_rules / parse_naming_rules / parse_table_schema / save_config
+    workspaces/lab/profile.py — HomeworkHandler.normalize
     config_manager.py       — ConfigManager
     tools/cipher.py         — cipher
 """
@@ -28,8 +27,8 @@ from core.sync import _extract_crid, diff_db, build_db
 from core.files import scan_videos, rename_files, rollback_records, is_subpath
 from core.screenshots import format_time_label
 from core.db import Database
-from profiles import _apply_rules
-from profiles.homework.handler import HomeworkHandler
+from workspaces._shared import _apply_rules
+from workspaces.lab.profile import HomeworkHandler
 from workspaces import _shared as shared
 from config_manager import ConfigManager
 from tools.cipher import cipher
