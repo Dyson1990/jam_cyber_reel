@@ -82,6 +82,10 @@ def setup_logging(log_dir: Path) -> None:
     root.addHandler(_file_handler(str(log_dir / "warning.log"), logging.WARNING, _LevelFilter(logging.WARNING, logging.WARNING)))
     root.addHandler(_file_handler(str(log_dir / "error.log"), logging.ERROR, _LevelFilter(logging.ERROR)))
 
+    # watchfiles（reload 热重载）对每次文件变化都打 DEBUG「change detected」，
+    # 该日志又写回 app.log，形成「检测→写日志→再检测」的死循环；抬高级别打断闭环
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
+
     _configured = True
 
 

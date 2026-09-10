@@ -25,7 +25,8 @@ from workspaces._shared import parse_naming_rules
 from workspaces.screen.ai_naming import build_prompt, call_deepseek, fetch_infos
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
-    log, clear_log, set_running, set_ready, build_profile_radio, build_log_panel,
+    log, clear_log, set_running, set_ready, set_error,
+    run_button, build_profile_radio, build_log_panel,
 )
 
 logger = get_logger(__name__)
@@ -106,12 +107,8 @@ def _on_method_change(config_mgr, profile, value, render_sub):
 def _build_rollback_row(handler):
     """回滚按钮行：回滚上一批 + 批量回滚（含日期范围）排在一行。"""
     with ui.row().classes("gap-2 items-center mt-3"):
-        ui.button(
-            "↺ 回滚上一批",
-            on_click=lambda: _run_rollback_batch(handler),
-        ).classes(
-            "bg-orange-900 hover:bg-orange-700 text-orange-300 font-mono "
-            "border border-orange-600 rounded px-4 py-2"
+        run_button(
+            "↺ 回滚上一批", "cyan", lambda: _run_rollback_batch(handler), pad="px-4 py-2",
         )
         ui.label("日期范围：").classes("text-xs text-slate-500 font-mono")
         date_from = ui.input(value="", placeholder="YYYY-MM-DD").classes(
@@ -120,12 +117,9 @@ def _build_rollback_row(handler):
         date_to = ui.input(value="", placeholder="YYYY-MM-DD").classes(
             "w-36 font-mono text-xs"
         ).props("outlined dense dark type=date")
-        ui.button(
-            "↺↺ 批量回滚",
-            on_click=lambda: _run_rollback_range(handler, date_from, date_to),
-        ).classes(
-            "bg-red-900 hover:bg-red-700 text-red-300 font-mono "
-            "border border-red-600 rounded px-4 py-2"
+        run_button(
+            "↺↺ 批量回滚", "cyan", lambda: _run_rollback_range(handler, date_from, date_to),
+            pad="px-4 py-2",
         )
 
 
@@ -143,13 +137,7 @@ def _build_mapping_naming(handler, config_mgr, profile):
     )
 
     with ui.row().classes("gap-4 mt-4"):
-        ui.button(
-            "▶ 文件名更新",
-            on_click=lambda: _run_rename(handler),
-        ).classes(
-            "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono "
-            "border border-cyan-600 rounded px-6 py-2"
-        )
+        run_button("▶ 文件名更新", "cyan", lambda: _run_rename(handler))
 
     _build_rollback_row(handler)
 
@@ -203,15 +191,12 @@ def _build_ai_naming(config_mgr, profile, handler):
     result_state = {"result": {}}
 
     def _btn(label, on_click, color):
-        return ui.button(label, on_click=on_click).classes(
-            f"bg-{color}-900 hover:bg-{color}-700 text-{color}-300 font-mono "
-            f"border border-{color}-600 rounded px-6 py-2"
-        )
+        return run_button(label, color, on_click)
 
     with ui.row().classes("gap-3 mt-4"):
         _btn("生成需求", lambda: _gen_prompt(config_mgr, profile, handler, prompt_area), "cyan")
-        _btn("预览改动", lambda: _preview(config_mgr, profile, prompt_area, result_state, result_container), "green")
-        _btn("应用映射", lambda: _apply(config_mgr, profile, handler, result_state), "orange")
+        _btn("预览改动", lambda: _preview(config_mgr, profile, prompt_area, result_state, result_container), "cyan")
+        _btn("应用映射", lambda: _apply(config_mgr, profile, handler, result_state), "cyan")
 
     _build_rollback_row(handler)
 
@@ -251,14 +236,14 @@ async def _gen_prompt(config_mgr, profile, handler, prompt_area):
     from_dir = Path(config_mgr.get_profile_config(profile).get("from", ""))
     if not from_dir or not from_dir.exists():
         log("  From 未设置或目录不存在", "red")
-        set_ready()
+        set_error()
         return
     try:
         files = await asyncio.to_thread(handler.scan, root_override=from_dir)
     except Exception as e:
         logger.exception("scan 失败 from=%s", from_dir)
         log(f"  scan 失败: {e}", "red")
-        set_ready()
+        set_error()
         return
     if not files:
         log("  From 中无视频文件", "yellow")
@@ -287,9 +272,11 @@ async def _preview(config_mgr, profile, prompt_area, result_state, result_contai
     prompt = (prompt_area.value or "").strip()
     if not key:
         log("  未设置 Deepseek Key", "red")
+        set_error()
         return
     if not prompt:
         log("  提示词为空，请先点「生成需求」", "red")
+        set_error()
         return
     clear_log()
     set_running("预览改动")
@@ -299,7 +286,7 @@ async def _preview(config_mgr, profile, prompt_area, result_state, result_contai
     except Exception as e:
         logger.exception("deepseek 调用失败")
         log(f"  调用失败: {e}", "red")
-        set_ready()
+        set_error()
         return
     result_state["result"] = result
     _save_mapping(result)
@@ -315,18 +302,18 @@ async def _apply(config_mgr, profile, handler, result_state):
     result = result_state.get("result", {})
     if not result:
         log("  尚无预览结果，请先点「预览改动」", "red")
-        set_ready()
+        set_error()
         return
     cfg = config_mgr.get_profile_config(profile)
     from_path = cfg.get("from", "")
     to_path = cfg.get("to", "")
     if not from_path:
         log("  From 未设置", "red")
-        set_ready()
+        set_error()
         return
     if not to_path:
         log("  To 未设置", "red")
-        set_ready()
+        set_error()
         return
     from_dir = Path(from_path)
     to_dir = Path(to_path)
@@ -340,7 +327,7 @@ async def _apply(config_mgr, profile, handler, result_state):
     except Exception as e:
         logger.exception("AI 重命名失败 profile=%s", profile)
         log(f"  重命名失败: {e}", "red")
-        set_ready()
+        set_error()
         return
     ok = sum(1 for r in records if r.get("status") == "成功")
     fail = len(records) - ok
@@ -400,11 +387,11 @@ async def _run_rename(handler):
     to_path = cfg.get("to", "")
     if not from_path:
         log("  From 未设置", "red")
-        set_ready()
+        set_error()
         return
     if not to_path:
         log("  To 未设置", "red")
-        set_ready()
+        set_error()
         return
 
     from_dir = Path(from_path)
@@ -412,7 +399,7 @@ async def _run_rename(handler):
 
     if not from_dir.exists():
         log(f"  From 目录不存在: {from_dir}", "red")
-        set_ready()
+        set_error()
         return
 
     if cancel_requested():
@@ -426,7 +413,7 @@ async def _run_rename(handler):
     except Exception as e:
         logger.exception("scan 失败 from=%s", from_dir)
         log(f"  scan 失败: {e}", "red")
-        set_ready()
+        set_error()
         return
 
     if cancel_requested():
@@ -457,7 +444,7 @@ async def _run_rename(handler):
     except Exception as e:
         logger.exception("normalize 失败 profile=%s", handler.profile_name)
         log(f"  normalize 失败: {e}", "red")
-        set_ready()
+        set_error()
         return
 
     if cancel_requested():
@@ -488,7 +475,7 @@ async def _run_rename(handler):
     except Exception as e:
         logger.exception("rename 失败 profile=%s", handler.profile_name)
         log(f"  rename 失败: {e}", "red")
-        set_ready()
+        set_error()
         return
 
     log("◆ 文件名更新完成 ✓", "cyan")
@@ -522,6 +509,8 @@ async def _run_rollback_batch(handler):
     except Exception as e:
         logger.exception("回滚上一批失败 profile=%s", handler.profile_name)
         log(f"  回滚失败: {e}", "red")
+        set_error()
+        return
     set_ready()
 
 
@@ -532,6 +521,7 @@ async def _run_rollback_range(handler, date_from, date_to):
     ed = (date_to.value or "").strip().replace("/", "-")
     if not sd or not ed:
         log("  请选择开始和结束日期", "yellow")
+        set_error()
         return
     set_running("批量回滚")
     log(f"◆ 回滚 {sd} ~ {ed}...", "yellow")
@@ -550,6 +540,8 @@ async def _run_rollback_range(handler, date_from, date_to):
     except Exception as e:
         logger.exception("批量回滚失败 profile=%s", handler.profile_name)
         log(f"  回滚失败: {e}", "red")
+        set_error()
+        return
     set_ready()
 
 

@@ -19,7 +19,8 @@ from core.logging_config import get_logger
 from core.common.browser import get_relative_exclude_dirs
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
-    log, clear_log, set_running, set_ready, build_profile_radio, build_log_panel,
+    log, clear_log, set_running, set_ready, set_error,
+    run_button, build_profile_radio, build_log_panel,
 )
 
 logger = get_logger(__name__)
@@ -71,20 +72,8 @@ def build_scan(config_mgr, db, registry):
                     ))
 
                 with ui.row().classes("gap-4"):
-                    ui.button(
-                        "▶ 对比差异",
-                        on_click=lambda: _run_db_diff(handler),
-                    ).classes(
-                        "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono "
-                        "border border-cyan-600 rounded px-6 py-2"
-                    )
-                    ui.button(
-                        "▶ 数据库同步",
-                        on_click=lambda: _run_db_sync(handler),
-                    ).classes(
-                        "bg-blue-900 hover:bg-blue-700 text-blue-300 font-mono "
-                        "border border-blue-600 rounded px-6 py-2"
-                    )
+                    run_button("▶ 对比差异", "cyan", lambda: _run_db_diff(handler))
+                    run_button("▶ 数据库同步", "cyan", lambda: _run_db_sync(handler))
 
         build_log_panel()
 
@@ -125,7 +114,7 @@ async def _run_db_diff(handler):
     except Exception as e:
         logger.exception("对比数据库差异失败 profile=%s", handler.profile_name)
         log(f"  对比失败: {e}", "red")
-        set_ready()
+        set_error()
         return
 
     if cancel_requested():
@@ -202,7 +191,7 @@ async def _run_db_sync(handler):
     except Exception as e:
         logger.exception("数据库同步失败 profile=%s", handler.profile_name)
         log(f"  数据库同步失败: {e}", "red")
-        set_ready()
+        set_error()
         return
 
     log("◆ 数据库同步完成 ✓", "cyan")

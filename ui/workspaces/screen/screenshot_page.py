@@ -20,7 +20,8 @@ from core.logging_config import get_logger
 from core.screenshots import capture_one_video
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
-    log, clear_log, set_running, set_ready, build_profile_radio, build_log_panel,
+    log, clear_log, set_running, set_ready, set_error,
+    run_button, build_profile_radio, build_log_panel,
 )
 
 logger = get_logger(__name__)
@@ -85,12 +86,8 @@ def build_screenshot(config_mgr, db, registry):
                         ),
                     )
 
-                ui.button(
-                    "▶ 截取截图",
-                    on_click=lambda: _run_capture_screenshots(handler),
-                ).classes(
-                    "bg-purple-900 hover:bg-purple-700 text-purple-300 font-mono "
-                    "border border-purple-600 rounded px-6 py-2"
+                run_button(
+                    "▶ 截取截图", "cyan", lambda: _run_capture_screenshots(handler),
                 )
 
         build_log_panel()
@@ -206,5 +203,6 @@ async def _run_capture_screenshots(handler):
         logger.exception("截图采集异常 profile=%s", handler.profile_name)
         log(f"◆ 截图采集异常: {e}", "red")
         log(traceback.format_exc(), "red")
-    finally:
-        set_ready()
+        set_error()
+        return
+    set_ready()

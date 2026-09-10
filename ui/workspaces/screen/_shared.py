@@ -43,20 +43,72 @@ def clear_log():
         _log_container.clear()
 
 
+# 按钮运行态配色：默认业务色 → 运行切霓虹黄(amber) → 报错切霓虹橙(orange)
+_active_btn = None
+_active_btn_color = ""
+_active_btn_pad = "px-6 py-2"
+
+
+def _btn_classes(color: str, pad: str = "px-6 py-2") -> str:
+    """按 Tailwind 色名生成霓虹描边按钮 class（运行/报错态复用同一模板）。"""
+    return (
+        f"bg-{color}-900 hover:bg-{color}-700 text-{color}-300 "
+        f"font-mono border border-{color}-600 rounded {pad}"
+    )
+
+
+def run_button(label: str, color: str, on_click, pad: str = "px-6 py-2"):
+    """创建业务按钮：点击即切运行色；回调内 set_ready()/set_error() 决定结束态。
+
+    color=None 关闭 Quasar 默认 primary 底色（其 bg-primary 带 !important 会锁死填充色），
+    让 Tailwind 的 bg-*/text-*/border-* 能真正作用于整颗按钮。
+    """
+    btn = ui.button(label, color=None).classes(_btn_classes(color, pad))
+
+    async def _click():
+        _mark_running(btn, color, pad)
+        await on_click()
+
+    btn.on_click(_click)
+    return btn
+
+
+def _mark_running(btn, color: str, pad: str):
+    """切到运行色并记为当前活动按钮，供 set_ready/set_error 恢复。"""
+    global _active_btn, _active_btn_color, _active_btn_pad
+    _active_btn, _active_btn_color, _active_btn_pad = btn, color, pad
+    btn.classes(replace=_btn_classes("amber", pad))
+
+
 def set_running(label: str):
-    """设置状态栏为 '运行：<功能名>'。"""
+    """设置状态栏为 '运行：<功能名>'（按钮色由 run_button 负责）。"""
     from ui.state import status_text
     if status_text:
         status_text.set_text(f"运行：{label}")
 
 
-def set_ready():
-    """恢复状态栏为就绪。"""
+def _finish(text: str, color: str | None):
+    """结束态统一处理：恢复/变色当前活动按钮 + 状态栏 + 进度归零。"""
+    global _active_btn
+    if _active_btn is not None:
+        target = color or _active_btn_color
+        _active_btn.classes(replace=_btn_classes(target, _active_btn_pad))
+        _active_btn = None
     from ui.state import status_text, status_progress
     if status_text:
-        status_text.set_text("就绪")
+        status_text.set_text(text)
     if status_progress:
         status_progress.set_value(0)
+
+
+def set_ready():
+    """业务结束：按钮恢复原色，状态栏标「就绪」。"""
+    _finish("就绪", None)
+
+
+def set_error():
+    """业务报错：按钮切霓虹橙，状态栏标「出错」。"""
+    _finish("出错", "orange")
 
 
 def build_profile_radio(config_mgr, page: str):
