@@ -24,8 +24,8 @@ from langchain_deepseek import ChatDeepSeek
 DEEPSEEK_MODEL = "deepseek-chat"
 EMBED_DIM = 256
 
-# 豆瓣评分数据源：标题→id 用豆瓣搜索建议，id→评分用 apizero（匿名免 Key）
-DOUBAN_SUGGEST_URL = "https://movie.douban.com/j/subject_suggest"
+# 豆瓣数据源：标题→subjectId 用搜索联想，id→详情用 apizero（含中英文名/评分/年份，匿名免 Key）
+DOUBAN_SUGGEST_URL = "https://www.douban.com/j/search_suggest"
 APIZERO_MOVIE_URL = "https://v1.apizero.cn/api/douban-movie"
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -225,14 +225,14 @@ def _parse_result(content: str) -> dict[str, str]:
 
 def _http_json(url: str, timeout: float = 8.0):
     req = urllib.request.Request(
-        url, headers={"User-Agent": _UA, "Referer": "https://movie.douban.com/"},
+        url, headers={"User-Agent": _UA, "Referer": "https://www.douban.com/"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _search_subject_id(query: str) -> str | None:
-    """标题 → 豆瓣 subjectId（取搜索建议首条）；空结果延时重试以规避限流。"""
+    """标题 → 豆瓣 subjectId（搜索联想首条电影卡 url）；空结果延时重试。"""
     url = f"{DOUBAN_SUGGEST_URL}?q={urllib.parse.quote(query)}"
     for attempt in range(3):
         try:
@@ -240,10 +240,13 @@ def _search_subject_id(query: str) -> str | None:
         except Exception as e:
             logger.warning("豆瓣搜索失败 %s: %s", query, e)
             return None
-        items = data if isinstance(data, list) else data.get("items", [])
-        for it in items:
-            if isinstance(it, dict) and it.get("id"):
-                return str(it["id"])
+        cards = data.get("cards", []) if isinstance(data, dict) else []
+        for card in cards:
+            if not isinstance(card, dict) or card.get("type") != "movie":
+                continue
+            m = re.search(r"/subject/(\d+)", card.get("url") or "")
+            if m:
+                return m.group(1)
         if attempt < 2:
             time.sleep(_SEARCH_DELAY)
     return None
@@ -301,7 +304,7 @@ def _title_query(filename: str) -> str:
 
 
 def fetch_douban_info(query: str) -> dict | None:
-    """按电影名取豆瓣信息 {score, year}；失败返回 None。"""
+    """按电影名取豆瓣信息 {zh, en, score, year}；失败返回 None。"""
     sid = _search_subject_id(query)
     if not sid:
         return None
