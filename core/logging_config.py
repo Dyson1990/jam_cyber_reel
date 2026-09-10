@@ -107,6 +107,11 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
+def get_log_dir() -> Path | None:
+    """返回日志目录（供业务侧写入可检查的产物文件）。"""
+    return _log_dir
+
+
 def read_recent_logs(lines: int = 100, level: str | None = None) -> list[str]:
     """读取日志文件末尾 N 行（供首页运行日志面板展示）。
 

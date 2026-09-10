@@ -9,6 +9,11 @@ PROFILES = {
         "naming_rules": {},
         "extra_config": {},
         "crid_pattern": "",
+        "naming_mode": "mapping",
+        "ai_api_key": "",
+        "ai_prompt": "",
+        "ai_batch_size": 20,
+        "ai_douban": False,
         "screenshot_config": {"count": 3, "moments": []},
         "table_schema": [
             {"name": "director", "type": "TEXT", "label": "导演"},
@@ -27,6 +32,11 @@ PROFILES = {
         "naming_rules": {},
         "extra_config": {},
         "crid_pattern": "",
+        "naming_mode": "mapping",
+        "ai_api_key": "",
+        "ai_prompt": "",
+        "ai_batch_size": 20,
+        "ai_douban": False,
         "screenshot_config": {"count": 3, "moments": []},
         "table_schema": [
             {"name": "series", "type": "TEXT", "label": "系列"},

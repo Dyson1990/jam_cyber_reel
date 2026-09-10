@@ -10,11 +10,14 @@
     - 数据聚合委托 core/common/dashboard.py
 """
 
+import json
+
 from nicegui import ui
 
 from core.common.dashboard import get_workspace_overview, get_changelog
 from core.logging_config import read_recent_logs
-from ui.state import tag
+from ui.state import tag, update_drawer_info
+from workspaces._shared import parse_table_schema, parse_json_or
 
 
 def build_home(config_mgr, db):
@@ -119,3 +122,55 @@ def build_overview(config_mgr, db):
         ui.label(f"当前 Profile 共 {data['rename_count']} 条重命名记录").classes(
             "text-sm font-mono text-slate-400 mt-2"
         )
+
+    # 表结构 / 扩展配置编辑（原配置页的非功能参数，暂放概览）
+    cfg = config_mgr.get_profile_config(profile)
+    with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-4 w-full mt-4"):
+        tag("schema-config")
+        ui.label("表结构 / 扩展配置").classes("text-xs text-slate-500 font-mono")
+        ui.label("表结构 (Table Schema):").classes("text-sm font-mono text-slate-400 mt-2 mb-1")
+        schema_editor = ui.textarea(
+            value=json.dumps(cfg.get("table_schema", []), ensure_ascii=False, indent=2)
+        ).classes("w-full bg-slate-700 text-cyan-100 font-mono text-sm").style(
+            "min-height: 100px;"
+        )
+        ui.label("扩展配置 (Extra Config):").classes("text-sm font-mono text-slate-400 mt-3 mb-1")
+        extra_editor = ui.textarea(
+            value=json.dumps(cfg.get("extra_config", {}), ensure_ascii=False, indent=2)
+        ).classes("w-full bg-slate-700 text-cyan-100 font-mono text-sm").style(
+            "min-height: 80px;"
+        )
+        status_label = ui.label("").classes("text-sm font-mono mt-2")
+        ui.button(
+            "◆ 保存",
+            on_click=lambda: _save_schema(
+                config_mgr, db, profile, schema_editor.value, extra_editor.value, status_label,
+            ),
+        ).classes(
+            "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono "
+            "border border-cyan-600 rounded px-6 py-2 mt-3"
+        )
+
+
+def _save_schema(config_mgr, db, profile, schema_str, extra_str, status_label):
+    """校验并保存当前 Profile 的表结构 / 扩展配置。"""
+    try:
+        schema = parse_table_schema(schema_str)
+    except (json.JSONDecodeError, ValueError) as e:
+        status_label.set_text(f"表结构 JSON 格式错误: {e}")
+        status_label.classes("text-red-400 text-sm font-mono mt-2")
+        return
+    try:
+        extra = parse_json_or(extra_str, {})
+    except json.JSONDecodeError as e:
+        status_label.set_text(f"扩展配置 JSON 格式错误: {e}")
+        status_label.classes("text-red-400 text-sm font-mono mt-2")
+        return
+
+    config_mgr.update_profile_config(profile, "table_schema", schema)
+    config_mgr.update_profile_config(profile, "extra_config", extra)
+    # 补齐 media 表缺失的新增扩展列，避免后续 upsert 报「no such column」
+    db.create_media_table(profile, schema)
+    update_drawer_info()
+    status_label.set_text("已保存 ✓")
+    status_label.classes("text-blue-400 text-sm font-mono mt-2")

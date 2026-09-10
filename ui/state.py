@@ -39,7 +39,9 @@ MENU_ITEMS = {
     "tools": ("◆", "工具"),
     "overview": ("◈", "概览"),
     "config": ("⚙", "配置"),
-    "sync": ("↻", "同步"),
+    "scan": ("▤", "扫描"),
+    "normalize": ("✎", "标准化"),
+    "screenshot": ("▣", "截图"),
 }
 
 
@@ -100,7 +102,9 @@ def switch_page(page: str):
     from ui.browser_page import build_browser
     from ui.tools_page import build_tools
     from ui.workspaces._shared import build_config
-    from ui.workspaces.screen.sync_page import build_sync
+    from ui.workspaces.screen.scan_page import build_scan
+    from ui.workspaces.screen.normalize_page import build_normalize
+    from ui.workspaces.screen.screenshot_page import build_screenshot
 
     content_area.clear()
     with content_area:
@@ -110,8 +114,12 @@ def switch_page(page: str):
             build_overview(config_mgr, db_instance)
         elif page == "config":
             build_config(config_mgr, registry)
-        elif page == "sync":
-            build_sync(config_mgr, db_instance, registry)
+        elif page == "scan":
+            build_scan(config_mgr, db_instance, registry)
+        elif page == "normalize":
+            build_normalize(config_mgr, db_instance, registry)
+        elif page == "screenshot":
+            build_screenshot(config_mgr, db_instance, registry)
         elif page == "browser":
             build_browser(config_mgr, db_instance)
         elif page == "tools":

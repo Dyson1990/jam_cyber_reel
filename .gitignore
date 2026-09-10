@@ -17,6 +17,10 @@ Thumbs.db
 # Temp
 .claude/
 
+# 运行时配置 / 状态（含密钥）
+workspaces/*/config.json
+core/state.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -2,8 +2,9 @@
 配置管理器 - 管理所有 Profile 的配置持久化。
 
 文件作用：
-    统一管理 Profile 配置的读写，使用 JSON 文件持久化。
-    支持切换当前 Profile、修改配置、保存配置。
+    统一管理 Profile 配置的读写。
+    各 Profile 的运行时覆盖值按业务域（workspace）分文件持久化，
+    全局唯一的 current_profile 持久化到 core 状态文件。
 
 与其它模块的关系：
     - 被 UI 配置页调用（读取/修改/保存）
@@ -14,8 +15,9 @@
     ConfigManager: 配置管理核心类
 
 数据流向：
-    UI 配置页 → ConfigManager → profiles_config.json
+    UI 配置页 → ConfigManager → workspaces/<ws>/config.json（各 workspace 运行时覆盖）
     Profile handler ← ConfigManager.get_profile_config()
+    current_profile → core/state.json（全局唯一）
 """
 
 import copy
@@ -23,76 +25,102 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from workspaces import PROFILE_DEFAULTS
+from workspaces import PROFILE_DEFAULTS, WORKSPACES, workspace_of
 
 
 class ConfigManager:
     """Profile 配置管理器。
 
     设计理由：
-        所有配置集中管理，以 JSON 文件持久化，
-        避免各 Profile 自行管理配置导致不一致。
-        current_profile 也由此管理，确保全局唯一。
+        默认 schema 由各 workspace 的 PROFILE_DEFAULTS 定义（单一来源），
+        运行时覆盖值按 workspace 分文件持久化，避免集中式大 JSON 重复默认值。
+        current_profile 全局唯一，独立持久化到 core/state.json。
     """
 
-    def __init__(self, config_path: Path):
+    def __init__(self, base: Path):
         """初始化配置管理器。
 
         Args:
-            config_path: 配置文件路径（profiles_config.json）
+            base: 项目根目录（workspaces/<ws>/config.json、core/state.json 位于其下）
         """
-        self.config_path = config_path
+        self.base = base
         self._data: dict = self._load()
 
     def _load(self) -> dict:
-        """加载配置：默认结构为基底，磁盘存储的覆盖值合并其上。
-
-        设计理由：
-            默认 schema 由各 workspace 的 PROFILE_DEFAULTS 定义（单一来源），
-            JSON 仅存用户运行时覆盖（root/from/to/naming_rules 等）。
-            合并后，即使旧 JSON 缺失新字段（如 crid_pattern）也会被补齐。
-
-        Returns:
-            配置字典
-        """
+        """加载配置：默认结构为基底，各 workspace 覆盖值 + core 状态合并其上。"""
         data = self._default_config()
-        if self.config_path.exists():
-            try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    self._merge_stored(data, json.load(f))
-            except (json.JSONDecodeError, OSError):
-                # 备份损坏文件，避免后续 save() 覆盖前丢失原配置
+        for ws in WORKSPACES:
+            path = self._workspace_path(ws)
+            if path.exists():
                 try:
-                    bak = self.config_path.with_name(self.config_path.name + ".bak")
-                    bak.write_bytes(self.config_path.read_bytes())
-                except OSError:
-                    pass
+                    with open(path, "r", encoding="utf-8") as f:
+                        self._merge_stored(data, json.load(f))
+                except (json.JSONDecodeError, OSError):
+                    self._backup(path)
+        state = self._state_path()
+        if state.exists():
+            try:
+                with open(state, "r", encoding="utf-8") as f:
+                    cur = json.load(f).get("current_profile")
+                if cur:
+                    data["current_profile"] = cur
+            except (json.JSONDecodeError, OSError):
+                pass
         return data
+
+    def _workspace_path(self, ws: str) -> Path:
+        return self.base / "workspaces" / ws / "config.json"
+
+    def _state_path(self) -> Path:
+        return self.base / "core" / "state.json"
+
+    @staticmethod
+    def _backup(path: Path) -> None:
+        """损坏文件先备份，避免后续 save() 覆盖前丢失原值。"""
+        try:
+            path.with_name(path.name + ".bak").write_bytes(path.read_bytes())
+        except OSError:
+            pass
 
     @staticmethod
     def _merge_stored(data: dict, stored: dict) -> None:
-        """将存储值合并进默认结构：按 profile 浅合并，仅覆盖存储中出现的键。"""
+        """按 profile 浅合并存储覆盖值到默认结构上。"""
         defaults = data["profiles"]
         for name, cfg in stored.get("profiles", {}).items():
             defaults.setdefault(name, {}).update(cfg)
-        if "current_profile" in stored:
-            data["current_profile"] = stored["current_profile"]
 
     def _default_config(self) -> dict:
-        """生成默认配置结构（schema 来自各 workspace 的 PROFILE_DEFAULTS）。
-
-        Returns:
-            默认配置字典
-        """
         return {
             "current_profile": "movie",
             "profiles": copy.deepcopy(PROFILE_DEFAULTS),
         }
 
     def save(self) -> None:
-        """将当前配置写入磁盘。"""
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, ensure_ascii=False, indent=2)
+        """写回磁盘：按 workspace 分文件存覆盖值，core 存 current_profile。"""
+        by_ws: dict = {}
+        defaults = PROFILE_DEFAULTS
+        for pname, cfg in self._data.get("profiles", {}).items():
+            default = defaults.get(pname, {})
+            overrides = {
+                k: v for k, v in cfg.items()
+                if k not in default or v != default[k]
+            }
+            if overrides:
+                by_ws.setdefault(workspace_of(pname), {})[pname] = overrides
+
+        for ws in WORKSPACES:
+            path = self._workspace_path(ws)
+            profiles = by_ws.get(ws)
+            if profiles:
+                self._write_json(path, {"profiles": profiles})
+            elif path.exists():
+                path.unlink()  # 覆盖值清空后移除文件，避免残留
+        self._write_json(self._state_path(), {"current_profile": self.current_profile})
+
+    def _write_json(self, path: Path, data: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     @property
     def current_profile(self) -> str:
@@ -133,8 +161,7 @@ class ConfigManager:
             value: 新值
         """
         profiles = self._data.setdefault("profiles", {})
-        p = profiles.setdefault(profile, {})
-        p[key] = value
+        profiles.setdefault(profile, {})[key] = value
         self.save()
 
     def list_profiles(self) -> list[str]:

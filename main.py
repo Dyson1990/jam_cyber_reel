@@ -102,7 +102,7 @@ logger = get_logger("main")
 
 logger.info("CyberReel 启动")
 
-config_mgr = ConfigManager(BASE / "profiles_config.json")
+config_mgr = ConfigManager(BASE)
 db = Database(BASE / "data.db")
 db.create_tables()
 db.ensure_all_media_tables(config_mgr)

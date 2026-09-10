@@ -358,7 +358,7 @@ class TestWorkspacesShared(unittest.TestCase):
 class TestConfigManager(unittest.TestCase):
     def test_load_defaults_and_switch(self):
         with tempfile.TemporaryDirectory() as d:
-            cm = ConfigManager(Path(d) / "cfg.json")
+            cm = ConfigManager(Path(d))
             self.assertIn("movie", cm.list_profiles())
             cm.current_profile = "tv"
             self.assertEqual(cm.current_profile, "tv")
@@ -367,7 +367,7 @@ class TestConfigManager(unittest.TestCase):
 
     def test_switch_unknown_profile_raises(self):
         with tempfile.TemporaryDirectory() as d:
-            cm = ConfigManager(Path(d) / "cfg.json")
+            cm = ConfigManager(Path(d))
             with self.assertRaises(ValueError):
                 cm.current_profile = "nope"
 

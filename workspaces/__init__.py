@@ -21,7 +21,7 @@ WORKSPACES = {
         "label": "影视",
         "profiles": ["movie", "tv"],
         "default_profile": "movie",
-        "menu": ["config", "sync"],
+        "menu": ["scan", "normalize", "screenshot"],
     },
     "doc": {
         "label": "纪实",
