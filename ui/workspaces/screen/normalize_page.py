@@ -335,7 +335,8 @@ async def _gen_prompt(config_mgr, profile, handler, prompt_area):
     if config_mgr.get_profile_config(profile).get("ai_douban", False):
         infos = await asyncio.to_thread(fetch_infos, batch)
     prompt = build_prompt(names, limit=limit, infos=infos)
-    prompt_area.set_value(prompt)
+    if not prompt_area.is_deleted:
+        prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)
     msg = f"  已生成提示词：共 {len(names)} 个文件，取前 {len(batch)} 个"
     if infos:
@@ -438,6 +439,8 @@ def _save_mapping(result: dict[str, str]) -> None:
 
 def _render_result_table(container, result):
     """在容器内渲染映射表格：原文件名 → 新文件名。"""
+    if container.is_deleted:
+        return
     container.clear()
     with container:
         if not result:
@@ -472,7 +475,8 @@ async def _gen_fix_prompt(config_mgr, profile, prompt_area):
     names = [f.name for f in files]
     infos = await asyncio.to_thread(fetch_infos, names)
     prompt = build_fix_prompt(names, infos=infos)
-    prompt_area.set_value(prompt)
+    if not prompt_area.is_deleted:
+        prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)
     msg = f"  已生成修正提示词：共 {len(names)} 个文件"
     if infos:
@@ -556,6 +560,8 @@ async def _apply_fix(config_mgr, profile, handler, result_state):
 
 def _render_fix_table(container, result, selected):
     """渲染修正映射表格：勾选框 + 原文件名 → 新文件名。"""
+    if container.is_deleted:
+        return
     container.clear()
     with container:
         if not result:
