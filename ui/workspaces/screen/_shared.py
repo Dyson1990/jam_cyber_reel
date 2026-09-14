@@ -43,41 +43,48 @@ def clear_log():
         _log_container.clear()
 
 
-# 按钮运行态配色：默认业务色 → 运行切霓虹黄(amber) → 报错切霓虹橙(orange)
+# 霓虹配色（16 进制）：内联 style 直接作用于整颗按钮，无需 Tailwind 动态编译。
+# （曾用 Tailwind bg-*/text-*/border-*，动态加类会触发 Play CDN JIT 重编译，造成 1-2s 变色延迟）
+_NEON = {
+    "cyan":   ("#164e63", "#67e8f9", "#0891b2"),
+    "blue":   ("#1e3a8a", "#93c5fd", "#2563eb"),
+    "purple": ("#581c87", "#d8b4fe", "#9333ea"),
+    "green":  ("#14532d", "#86efac", "#16a34a"),
+    "orange": ("#7c2d12", "#fdba74", "#ea580c"),
+    "red":    ("#7f1d1d", "#fca5a5", "#dc2626"),
+    "amber":  ("#78350f", "#fcd34d", "#d97706"),
+}
+
 _active_btn = None
 _active_btn_color = ""
-_active_btn_pad = "px-6 py-2"
 
 
-def _btn_classes(color: str, pad: str = "px-6 py-2") -> str:
-    """按 Tailwind 色名生成霓虹描边按钮 class（运行/报错态复用同一模板）。"""
-    return (
-        f"bg-{color}-900 hover:bg-{color}-700 text-{color}-300 "
-        f"font-mono border border-{color}-600 rounded {pad}"
-    )
+def _btn_style(color: str) -> str:
+    """按色名返回内联 CSS：bg=填充 / color=文字 / border=边框，整颗按钮一起变色。"""
+    bg, text, border = _NEON[color]
+    return f"background-color: {bg}; color: {text}; border: 1px solid {border};"
 
 
 def run_button(label: str, color: str, on_click, pad: str = "px-6 py-2"):
     """创建业务按钮：点击即切运行色；回调内 set_ready()/set_error() 决定结束态。
 
-    color=None 关闭 Quasar 默认 primary 底色（其 bg-primary 带 !important 会锁死填充色），
-    让 Tailwind 的 bg-*/text-*/border-* 能真正作用于整颗按钮。
+    color=None 关闭 Quasar 默认 primary 底色（其 bg-primary 带 !important 会锁死填充色）。
     """
-    btn = ui.button(label, color=None).classes(_btn_classes(color, pad))
+    btn = ui.button(label, color=None).classes(f"font-mono {pad}").style(_btn_style(color))
 
     async def _click():
-        _mark_running(btn, color, pad)
+        _mark_running(btn, color)
         await on_click()
 
     btn.on_click(_click)
     return btn
 
 
-def _mark_running(btn, color: str, pad: str):
+def _mark_running(btn, color: str):
     """切到运行色并记为当前活动按钮，供 set_ready/set_error 恢复。"""
-    global _active_btn, _active_btn_color, _active_btn_pad
-    _active_btn, _active_btn_color, _active_btn_pad = btn, color, pad
-    btn.classes(replace=_btn_classes("amber", pad))
+    global _active_btn, _active_btn_color
+    _active_btn, _active_btn_color = btn, color
+    btn.style(replace=_btn_style("amber"))
 
 
 def set_running(label: str):
@@ -91,8 +98,7 @@ def _finish(text: str, color: str | None):
     """结束态统一处理：恢复/变色当前活动按钮 + 状态栏 + 进度归零。"""
     global _active_btn
     if _active_btn is not None:
-        target = color or _active_btn_color
-        _active_btn.classes(replace=_btn_classes(target, _active_btn_pad))
+        _active_btn.style(replace=_btn_style(color or _active_btn_color))
         _active_btn = None
     from ui.state import status_text, status_progress
     if status_text:
