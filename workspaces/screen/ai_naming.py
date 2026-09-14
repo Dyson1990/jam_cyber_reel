@@ -164,6 +164,27 @@ def _retrieve(query: str, k: int = 20) -> list[Document]:
     return hits
 
 
+def _info_section(names: list[str], infos: dict[str, dict] | None) -> str:
+    """组装「## 查询结果」段落：条目号 + 中文名/英文名/年份/评分。"""
+    if not infos:
+        return ""
+    rows = []
+    for i, n in enumerate(names, 1):
+        info = infos.get(n)
+        if not info:
+            continue
+        parts = [
+            f"{label}={info[key]}"
+            for key, label in (("zh", "中文名"), ("en", "英文名"), ("year", "年份"), ("score", "评分"))
+            if info.get(key)
+        ]
+        if parts:
+            rows.append(f"- 第{i}条：{'，'.join(parts)}")
+    if not rows:
+        return ""
+    return "\n\n## 查询结果（条目号对应上方文件名序号）\n" + "\n".join(rows)
+
+
 def build_prompt(
     filenames: list[str], limit: int | None = None, infos: dict[str, dict] | None = None,
 ) -> str:
@@ -171,30 +192,25 @@ def build_prompt(
     names = filenames[:limit] if limit else filenames
     context = "\n".join(f"- {d.page_content}" for d in _retrieve("\n".join(names)))
     lines = "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
-    sections = ""
-    if infos:
-        rows = []
-        for i, n in enumerate(names, 1):
-            info = infos.get(n)
-            if not info:
-                continue
-            parts = []
-            if info.get("zh"):
-                parts.append(f"中文名={info['zh']}")
-            if info.get("en"):
-                parts.append(f"英文名={info['en']}")
-            if info.get("year"):
-                parts.append(f"年份={info['year']}")
-            if info.get("score"):
-                parts.append(f"评分={info['score']}")
-            if parts:
-                rows.append(f"- 第{i}条：{'，'.join(parts)}")
-        if rows:
-            sections = "\n\n## 查询结果（条目号对应上方文件名序号）\n" + "\n".join(rows)
     return (
         "你是电影文件名标准化助手，请严格依据下列规则处理。\n\n"
         f"## 规则\n{context}\n\n"
-        f"## 待标准化文件名\n{lines}{sections}{_JSON_INSTRUCTION}"
+        f"## 待标准化文件名\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
+    )
+
+
+def build_fix_prompt(filenames: list[str], infos: dict[str, dict] | None = None) -> str:
+    """AI 修正提示词：仅检查/修正可查询补充槽位（中文名/英文名/年份/豆瓣评分），其余槽位不动。"""
+    names = list(filenames)
+    context = "\n".join(f"- {d.page_content}" for d in _retrieve("\n".join(names)))
+    lines = "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
+    return (
+        "你是电影文件名修正助手。以下文件名已完成标准化，请仅检查并修正"
+        "「中文名 / 英文名 / 年份 / 豆瓣评分」四个可查询补充槽位：依据「## 查询结果」改正错误、"
+        "补上漏查（查询结果有而文件名缺的字段）；其余槽位（版本信息、视频参数、字幕信息等）一字不改；"
+        "无需修正的文件保持原名。\n\n"
+        f"## 槽位规范\n{context}\n\n"
+        f"## 待检查文件名\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
     )
 
 

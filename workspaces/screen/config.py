@@ -14,6 +14,7 @@ PROFILES = {
         "ai_prompt": "",
         "ai_batch_size": 20,
         "ai_douban": False,
+        "ai_fix_path": "",
         "screenshot_config": {"count": 3, "moments": []},
         "table_schema": [
             {"name": "director", "type": "TEXT", "label": "导演"},
@@ -37,6 +38,7 @@ PROFILES = {
         "ai_prompt": "",
         "ai_batch_size": 20,
         "ai_douban": False,
+        "ai_fix_path": "",
         "screenshot_config": {"count": 3, "moments": []},
         "table_schema": [
             {"name": "series", "type": "TEXT", "label": "系列"},

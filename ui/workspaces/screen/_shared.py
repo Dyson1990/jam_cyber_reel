@@ -113,8 +113,8 @@ def set_ready():
 
 
 def set_error():
-    """业务报错：按钮切霓虹橙，状态栏标「出错」。"""
-    _finish("出错", "orange")
+    """业务报错：按钮切霓虹红，状态栏标「出错」。"""
+    _finish("出错", "red")
 
 
 def build_profile_radio(config_mgr, page: str):
