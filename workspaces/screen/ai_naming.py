@@ -11,37 +11,16 @@ import hashlib
 import json
 import logging
 import math
-import re
-import time
-import urllib.parse
-import urllib.request
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_deepseek import ChatDeepSeek
 
-DEEPSEEK_MODEL = "deepseek-chat"
+DEEPSEEK_MODEL = "deepseek-v4-flash"
 EMBED_DIM = 256
 
-# 豆瓣数据源：标题→subjectId 用搜索联想，id→详情用 apizero（含中英文名/评分/年份，匿名免 Key）
-DOUBAN_SUGGEST_URL = "https://www.douban.com/j/search_suggest"
-APIZERO_MOVIE_URL = "https://v1.apizero.cn/api/douban-movie"
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-)
-
 logger = logging.getLogger(__name__)
-
-# 英文片名检索时的参数噪声词（命中即截断片名）
-_TITLE_STOP = frozenset({
-    "1080p", "2160p", "720p", "480p", "4k", "bluray", "web-dl", "webdl",
-    "bdrip", "x264", "x265", "h264", "h265", "10bit", "remux", "dvdrip",
-    "hdrip", "hevc", "avc", "dts", "dts-hd", "truehd", "atmos",
-})
-
-_SEARCH_DELAY = 2.0  # apizero 匿名接口对连发请求会 429，请求间延时规避
 
 # 规则知识库：每条自包含，便于单独检索与灵活增删（总结自旧版AI总结.md）
 # 规则知识库：一条「标准格式」模板固定槽位顺序，其余规则只描述各槽位的
@@ -237,110 +216,41 @@ def _parse_result(content: str) -> dict[str, str]:
     return {str(k): str(v) for k, v in data.items()}
 
 
-# ==================== 豆瓣评分 ====================
-
-def _http_json(url: str, timeout: float = 8.0):
-    req = urllib.request.Request(
-        url, headers={"User-Agent": _UA, "Referer": "https://www.douban.com/"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-def _search_subject_id(query: str) -> str | None:
-    """标题 → 豆瓣 subjectId（搜索联想首条电影卡 url）；空结果延时重试。"""
-    url = f"{DOUBAN_SUGGEST_URL}?q={urllib.parse.quote(query)}"
-    for attempt in range(3):
-        try:
-            data = _http_json(url)
-        except Exception as e:
-            logger.warning("豆瓣搜索失败 %s: %s", query, e)
-            return None
-        cards = data.get("cards", []) if isinstance(data, dict) else []
-        for card in cards:
-            if not isinstance(card, dict) or card.get("type") != "movie":
-                continue
-            m = re.search(r"/subject/(\d+)", card.get("url") or "")
-            if m:
-                return m.group(1)
-        if attempt < 2:
-            time.sleep(_SEARCH_DELAY)
-    return None
+_EXTRACT_INSTRUCTION = (
+    "你是电影文件名解析助手。对每个文件名，提取其中的「中文名」和「英文名」："
+    "中文名取文件名里的中文字段；英文名取文件名里的英文片名（去掉年份、分辨率、"
+    "编码、音轨、字幕、发布组等噪音词）；两者都没有则该字段为空字符串。\n"
+    "仅输出一个 JSON 字典：key 为原文件名，value 为 {\"zh\": 中文名, \"en\": 英文名}，"
+    "不要输出任何其他文字或解释。"
+)
 
 
-def _apizero_info(subject_id: str) -> dict:
-    """subjectId → {zh, en, score, year}（apizero，匿名免 Key）。"""
-    data = _http_json(f"{APIZERO_MOVIE_URL}?id={urllib.parse.quote(subject_id)}")
-    if isinstance(data, dict) and isinstance(data.get("data"), dict):
-        data = data["data"]
+def extract_names(api_key: str, filenames: list[str]) -> dict[str, dict]:
+    """AI 从文件名提取中/英文名 → {文件名: {zh, en}}（供知识库扩充，非重命名）。"""
+    lines = "\n".join(f"{i}. {n}" for i, n in enumerate(filenames, 1))
+    llm = ChatDeepSeek(model=DEEPSEEK_MODEL, api_key=api_key, temperature=0)
+    content = llm.invoke(_EXTRACT_INSTRUCTION + f"\n\n## 待解析文件名\n{lines}").content
+    return _parse_extract(content)
+
+
+def _parse_extract(content: str) -> dict[str, dict]:
+    """解析 extract_names 返回的 {文件名: {zh,en}}，容忍代码块包裹。"""
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError(f"返回内容不是 JSON: {content[:200]}")
+    data = json.loads(text[start:end + 1])
     if not isinstance(data, dict):
-        return {}
-    info: dict = {}
-    name = data.get("name") or ""
-    if name:
-        # 豆瓣 name 形如「中文名 英文名」，按首个英文字母拆成中/英文名
-        m = re.search(r"[A-Za-z]", name)
-        zh = name[:m.start()].strip() if m else name.strip()
-        en = name[m.start():].strip() if m else ""
-        if zh:
-            info["zh"] = zh
-        if en:
-            info["en"] = en
-    score = data.get("score") or data.get("rating") or data.get("douban_score")
-    try:
-        if score:
-            info["score"] = f"豆{float(score):.1f}"
-    except (TypeError, ValueError):
-        pass
-    year = data.get("year") or data.get("date") or data.get("pubdate")
-    if year:
-        y = str(year)[:4]
-        if y.isdigit():
-            info["year"] = y
-    return info
-
-
-def _title_query(filename: str) -> str:
-    """从原始文件名粗糙提取片名作搜索词（供豆瓣检索，非精确）。"""
-    name = filename.rsplit(".", 1)[0] if "." in filename else filename
-    for cut in "([【":
-        name = name.split(cut, 1)[0]
-    name = name.replace(".", " ").replace("_", " ").strip()
-    tokens = name.split()
-    if not tokens:
-        return ""
-    if any("一" <= c <= "鿿" for c in tokens[0]):
-        return tokens[0]  # 首个 token 是中文 → 当作片名
-    out = []
-    for t in tokens:
-        if re.fullmatch(r"(19|20)\d{2}", t) or t.lower() in _TITLE_STOP:
-            break
-        out.append(t)
-    return " ".join(out)
-
-
-def fetch_douban_info(query: str) -> dict | None:
-    """按电影名取豆瓣信息 {zh, en, score, year}；失败返回 None。"""
-    sid = _search_subject_id(query)
-    if not sid:
-        return None
-    info = _apizero_info(sid)
-    return info or None
-
-
-def fetch_infos(names: list[str]) -> dict[str, dict]:
-    """批量取豆瓣信息 {文件名: {score, year}}；请求间延时规避限流，单条失败跳过。"""
-    infos: dict[str, dict] = {}
-    for n in names:
-        q = _title_query(n)
-        if not q:
-            continue
-        try:
-            info = fetch_douban_info(q)
-        except Exception as e:
-            logger.warning("豆瓣取信息失败 %s: %s", q, e)
-        else:
-            if info:
-                infos[n] = info
-        time.sleep(_SEARCH_DELAY)
-    return infos
+        raise ValueError("返回内容不是字典")
+    out: dict[str, dict] = {}
+    for k, v in data.items():
+        if isinstance(v, dict):
+            out[str(k)] = {
+                "zh": str(v.get("zh") or "").strip(),
+                "en": str(v.get("en") or "").strip(),
+            }
+    return out

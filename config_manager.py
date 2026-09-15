@@ -61,11 +61,20 @@ class ConfigManager:
         if state.exists():
             try:
                 with open(state, "r", encoding="utf-8") as f:
-                    cur = json.load(f).get("current_profile")
-                if cur:
-                    data["current_profile"] = cur
+                    state_data = json.load(f)
+                if state_data.get("current_profile"):
+                    data["current_profile"] = state_data["current_profile"]
+                sh = state_data.get("shared")
+                if isinstance(sh, dict):
+                    data.setdefault("shared", {}).update(sh)
             except (json.JSONDecodeError, OSError):
                 pass
+        # 迁移：旧的 per-profile ai_api_key → screen 共享 deepseek_key（统一到概览后不再按 profile 存）
+        sh_screen = data.setdefault("shared", {}).setdefault("screen", {})
+        for p in WORKSPACES["screen"]["profiles"]:
+            legacy = data["profiles"].get(p, {}).pop("ai_api_key", "")
+            if legacy and not sh_screen.get("deepseek_key"):
+                sh_screen["deepseek_key"] = legacy
         return data
 
     def _workspace_path(self, ws: str) -> Path:
@@ -93,6 +102,7 @@ class ConfigManager:
         return {
             "current_profile": "movie",
             "profiles": copy.deepcopy(PROFILE_DEFAULTS),
+            "shared": {},
         }
 
     def save(self) -> None:
@@ -115,7 +125,10 @@ class ConfigManager:
                 self._write_json(path, {"profiles": profiles})
             elif path.exists():
                 path.unlink()  # 覆盖值清空后移除文件，避免残留
-        self._write_json(self._state_path(), {"current_profile": self.current_profile})
+        self._write_json(
+            self._state_path(),
+            {"current_profile": self.current_profile, "shared": self._data.get("shared", {})},
+        )
 
     def _write_json(self, path: Path, data: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,6 +176,19 @@ class ConfigManager:
         profiles = self._data.setdefault("profiles", {})
         profiles.setdefault(profile, {})[key] = value
         self.save()
+
+    def get_shared(self, ws: str, key: str, default=None):
+        """获取 workspace 级共享配置项（如 screen.deepseek_key）。"""
+        return self._data.get("shared", {}).get(ws, {}).get(key, default)
+
+    def set_shared(self, ws: str, key: str, value) -> None:
+        """写 workspace 级共享配置项（立即落盘）。"""
+        self._data.setdefault("shared", {}).setdefault(ws, {})[key] = value
+        self.save()
+
+    def get_deepseek_key(self) -> str:
+        """DeepSeek Key 唯一来源：screen 共享配置。"""
+        return self.get_shared("screen", "deepseek_key", "") or ""
 
     def list_profiles(self) -> list[str]:
         """列出所有可用 Profile 名称。"""

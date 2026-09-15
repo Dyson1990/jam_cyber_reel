@@ -19,6 +19,7 @@ Thumbs.db
 
 # 运行时配置 / 状态（含密钥）
 workspaces/*/config.json
+workspaces/*/kb/
 core/state.json
 
 # Byte-compiled / optimized / DLL files

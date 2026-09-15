@@ -3,3 +3,4 @@ Pillow>=10.0.0
 av>=18.0.0
 langchain-deepseek>=0.1.0
 numpy>=1.26
+chromadb>=1.5.3

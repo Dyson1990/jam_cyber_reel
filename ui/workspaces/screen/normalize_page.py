@@ -9,12 +9,11 @@
     from / to            — 两种命名方式共用
     naming_mode          — "mapping" | "ai"
     naming_rules         — 映射命名规则（JSON dict）
-    ai_api_key / ai_prompt — AI 命名参数
+    ai_prompt           — AI 命名提示词（DeepSeek Key 统一在概览设置）
 """
 
 import asyncio
 import json
-from datetime import datetime
 
 from pathlib import Path
 
@@ -24,8 +23,9 @@ from core.files import VIDEO_EXTENSIONS
 from core.logging_config import get_log_dir, get_logger
 from workspaces._shared import parse_naming_rules
 from workspaces.screen.ai_naming import (
-    build_prompt, build_fix_prompt, call_deepseek, fetch_infos,
+    build_prompt, build_fix_prompt, call_deepseek,
 )
+from workspaces.screen.sources import fetch_infos
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
     log, clear_log, set_running, set_ready, set_error,
@@ -192,14 +192,15 @@ def _build_ai_naming(config_mgr, profile, handler):
     tag("naming-ai")
     ui.label("AI 命名").classes("text-xs text-cyan-500 font-mono mb-2")
 
-    key = cfg.get("ai_api_key", "")
+
+    tmdb_key = cfg.get("tmdb_api_key", "")
     with ui.row().classes("gap-2 items-center w-full mb-3"):
-        ui.label("Deepseek Key:").classes("text-xs text-slate-500 font-mono w-24")
-        key_input = ui.input(
-            value=_mask_key(key) if key else "",
-            placeholder="未设置（输入新 Key 覆盖）" if not key else "输入新 Key 覆盖",
+        ui.label("TMDB Key:").classes("text-xs text-slate-500 font-mono w-24")
+        tmdb_input = ui.input(
+            value=_mask_key(tmdb_key) if tmdb_key else "",
+            placeholder="未设置（免费 Key，英文名/年份兜底）" if not tmdb_key else "输入新 Key 覆盖",
         ).props("outlined dense dark").classes("flex-1 font-mono text-xs").on_value_change(
-            lambda e: _save_key(config_mgr, profile, e.value or "", key_input),
+            lambda e: _save_tmdb_key(config_mgr, profile, e.value or "", tmdb_input),
         )
 
     with ui.row().classes("gap-2 items-center w-full mb-3"):
@@ -253,15 +254,6 @@ def _build_ai_fix(config_mgr, profile, handler):
     tag("naming-ai-fix")
     ui.label("AI 修正").classes("text-xs text-cyan-500 font-mono mb-2")
 
-    key = cfg.get("ai_api_key", "")
-    with ui.row().classes("gap-2 items-center w-full mb-3"):
-        ui.label("Deepseek Key:").classes("text-xs text-slate-500 font-mono w-24")
-        key_input = ui.input(
-            value=_mask_key(key) if key else "",
-            placeholder="未设置（输入新 Key 覆盖）" if not key else "输入新 Key 覆盖",
-        ).props("outlined dense dark").classes("flex-1 font-mono text-xs").on_value_change(
-            lambda e: _save_key(config_mgr, profile, e.value or "", key_input),
-        )
 
     ui.label("提示词 (Prompt):").classes("text-xs text-slate-500 font-mono mb-1")
     prompt_area = ui.textarea(value=cfg.get("ai_prompt", "")).classes(
@@ -291,10 +283,10 @@ def _mask_key(key: str) -> str:
     return f"{key[:3]}****{key[-4:]}"
 
 
-def _save_key(config_mgr, profile, value, key_input):
-    """录入新 key：非空才覆盖保存，并刷新输入框为脱敏显示。"""
+def _save_tmdb_key(config_mgr, profile, value, key_input):
+    """录入 TMDB key：非空才覆盖保存，并刷新输入框为脱敏显示。"""
     if value:
-        config_mgr.update_profile_config(profile, "ai_api_key", value)
+        config_mgr.update_profile_config(profile, "tmdb_api_key", value)
         key_input.set_value(_mask_key(value))
 
 
@@ -333,22 +325,24 @@ async def _gen_prompt(config_mgr, profile, handler, prompt_area):
     batch = names[:limit] if limit else names
     infos = {}
     if config_mgr.get_profile_config(profile).get("ai_douban", False):
-        infos = await asyncio.to_thread(fetch_infos, batch)
+        infos = await asyncio.to_thread(
+            fetch_infos, batch,
+            config_mgr.get_profile_config(profile).get("tmdb_api_key", ""),
+        )
     prompt = build_prompt(names, limit=limit, infos=infos)
     if not prompt_area.is_deleted:
         prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)
     msg = f"  已生成提示词：共 {len(names)} 个文件，取前 {len(batch)} 个"
     if infos:
-        msg += f"，命中豆瓣 {len(infos)} 条"
+        msg += f"，命中 {len(infos)} 条"
     log(msg, "cyan")
     set_ready()
 
 
 async def _preview(config_mgr, profile, prompt_area, result_state, result_container):
     """预览改动：提交提示词框内容（人工修改后）给 deepseek，表格展示映射。"""
-    cfg = config_mgr.get_profile_config(profile)
-    key = cfg.get("ai_api_key", "")
+    key = config_mgr.get_deepseek_key()
     prompt = (prompt_area.value or "").strip()
     if not key:
         log("  未设置 Deepseek Key", "red")
@@ -427,14 +421,15 @@ async def _apply(config_mgr, profile, handler, result_state):
 
 
 def _save_mapping(result: dict[str, str]) -> None:
-    """把 Deepseek 返回的映射落盘到 logs/，便于人工检查。"""
+    """把 Deepseek 返回的映射落盘到 logs/screen/ai_mapping.json（覆盖写，只留最新）。"""
     log_dir = get_log_dir()
     if not log_dir:
         return
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = log_dir / f"ai_mapping_{ts}.json"
+    screen_dir = log_dir / "screen"
+    screen_dir.mkdir(parents=True, exist_ok=True)
+    path = screen_dir / "ai_mapping.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    log(f"  映射已保存: logs/{path.name}", "gray")
+    log(f"  映射已保存: logs/screen/{path.name}", "gray")
 
 
 def _render_result_table(container, result):
@@ -473,22 +468,24 @@ async def _gen_fix_prompt(config_mgr, profile, prompt_area):
         set_ready()
         return
     names = [f.name for f in files]
-    infos = await asyncio.to_thread(fetch_infos, names)
+    infos = await asyncio.to_thread(
+        fetch_infos, names,
+        config_mgr.get_profile_config(profile).get("tmdb_api_key", ""),
+    )
     prompt = build_fix_prompt(names, infos=infos)
     if not prompt_area.is_deleted:
         prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)
     msg = f"  已生成修正提示词：共 {len(names)} 个文件"
     if infos:
-        msg += f"，命中豆瓣 {len(infos)} 条"
+        msg += f"，命中 {len(infos)} 条"
     log(msg, "cyan")
     set_ready()
 
 
 async def _preview_fix(config_mgr, profile, prompt_area, result_state, result_container):
     """预览修正：提交提示词给 deepseek，表格展示（含勾选框）。"""
-    cfg = config_mgr.get_profile_config(profile)
-    key = cfg.get("ai_api_key", "")
+    key = config_mgr.get_deepseek_key()
     prompt = (prompt_area.value or "").strip()
     if not key:
         log("  未设置 Deepseek Key", "red")

@@ -38,6 +38,7 @@ MENU_ITEMS = {
     "browser": ("▤", "媒体浏览器"),
     "tools": ("◆", "工具"),
     "overview": ("◈", "概览"),
+    "kb": ("▥", "知识库"),
     "config": ("⚙", "配置"),
     "scan": ("▤", "扫描"),
     "normalize": ("✎", "标准化"),
@@ -105,6 +106,7 @@ def switch_page(page: str):
     from ui.workspaces.screen.scan_page import build_scan
     from ui.workspaces.screen.normalize_page import build_normalize
     from ui.workspaces.screen.screenshot_page import build_screenshot
+    from ui.workspaces.screen.kb_page import build_kb
 
     content_area.clear()
     with content_area:
@@ -120,6 +122,8 @@ def switch_page(page: str):
             build_normalize(config_mgr, db_instance, registry)
         elif page == "screenshot":
             build_screenshot(config_mgr, db_instance, registry)
+        elif page == "kb":
+            build_kb(config_mgr, db_instance, registry)
         elif page == "browser":
             build_browser(config_mgr, db_instance)
         elif page == "tools":
