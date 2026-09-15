@@ -1,12 +1,12 @@
 """
-配置页共享前端 — screen/lab 复用。
+配置页共享前端 — 各 workspace 复用。
 
 文件作用：
     提供 Profile 切换、配置查看与修改功能（Root/From/To/命名规则/表结构/截图/扩展）。
     校验与保存逻辑委托 workspaces._shared.save_config()。
 
 与其它模块的关系：
-    - 被 screen/lab 的 config_page.py 复用
+    - 被各 workspace 的 config_page.py 复用
     - 修改 ConfigManager 数据，保存后调用 update_drawer_info
 """
 
@@ -18,7 +18,7 @@ from ui.state import update_drawer_info, render_workspace_menu, switch_page, tag
 from workspaces._shared import save_config
 
 
-def build_config(config_mgr, registry):
+def build_config(config_mgr, db, registry):
     """构建配置页 UI（对当前 Profile 编辑）。"""
     profile = config_mgr.current_profile
     cfg = config_mgr.get_profile_config()
@@ -112,7 +112,7 @@ def build_config(config_mgr, registry):
             on_click=lambda: _save_config(
                 config_mgr, profile, root_input.value, from_input.value, to_input.value,
                 rules_editor.value, schema_editor.value, ss_editor.value, extra_editor.value,
-                registry.db, status_label,
+                db, status_label,
             ),
         ).classes(
             "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono "

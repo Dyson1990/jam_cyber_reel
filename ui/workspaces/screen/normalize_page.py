@@ -25,6 +25,7 @@ from workspaces._shared import parse_naming_rules
 from workspaces.screen.ai_naming import (
     build_prompt, build_fix_prompt, call_deepseek,
 )
+from workspaces.screen.config import get_deepseek_key
 from workspaces.screen.sources import fetch_infos
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
@@ -342,7 +343,7 @@ async def _gen_prompt(config_mgr, profile, handler, prompt_area):
 
 async def _preview(config_mgr, profile, prompt_area, result_state, result_container):
     """预览改动：提交提示词框内容（人工修改后）给 deepseek，表格展示映射。"""
-    key = config_mgr.get_deepseek_key()
+    key = get_deepseek_key(config_mgr)
     prompt = (prompt_area.value or "").strip()
     if not key:
         log("  未设置 Deepseek Key", "red")
@@ -485,7 +486,7 @@ async def _gen_fix_prompt(config_mgr, profile, prompt_area):
 
 async def _preview_fix(config_mgr, profile, prompt_area, result_state, result_container):
     """预览修正：提交提示词给 deepseek，表格展示（含勾选框）。"""
-    key = config_mgr.get_deepseek_key()
+    key = get_deepseek_key(config_mgr)
     prompt = (prompt_area.value or "").strip()
     if not key:
         log("  未设置 Deepseek Key", "red")

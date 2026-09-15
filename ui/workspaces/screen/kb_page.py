@@ -15,9 +15,8 @@ from nicegui import ui
 
 from core.files import VIDEO_EXTENSIONS
 from core.logging_config import get_logger
-from workspaces.screen.ai_naming import extract_names
-from workspaces.screen.kb import kb_list, kb_lookup
-from workspaces.screen.sources import fetch_info, SEARCH_DELAY
+from workspaces.screen.config import get_deepseek_key
+from workspaces.screen.kb import kb_list, kb_lookup, kb_upsert
 from workspaces.screen.sources.douban import parse_apizero
 from ui.state import tag
 from ui.workspaces.screen._shared import (
@@ -93,8 +92,27 @@ def build_kb(config_mgr, db, registry):
 
                 run_button(
                     "▶ 更新", "cyan",
-                    lambda: _run_update(config_mgr, profile, path_input.value, _render_table),
+                    lambda: _run_update(
+                        config_mgr, profile, path_input.value, mode_radio.value, _render_table,
+                    ),
                 )
+
+            with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"):
+                tag("kb-manual")
+                ui.label("◆ 人工更新").classes("text-lg font-mono text-cyan-400 mb-2")
+                with ui.row().classes("gap-2 items-center w-full"):
+                    zh_input = ui.input(placeholder="中文名").classes(
+                        "flex-1 font-mono text-xs").props("outlined dense dark")
+                    en_input = ui.input(placeholder="英文名").classes(
+                        "flex-1 font-mono text-xs").props("outlined dense dark")
+                    year_input = ui.input(placeholder="年份").classes(
+                        "w-24 font-mono text-xs").props("outlined dense dark")
+                    score_input = ui.input(placeholder="豆瓣评分(可空)").classes(
+                        "w-32 font-mono text-xs").props("outlined dense dark")
+                    ui.button("✔ 保存", on_click=lambda: _manual_save()).classes(
+                        "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono text-sm "
+                        "border border-cyan-600 rounded px-4 py-1"
+                    )
 
             with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-6 w-full"):
                 tag("kb-table")
@@ -122,14 +140,36 @@ def build_kb(config_mgr, db, registry):
                 rows=rows,
             ).classes("w-full")
 
+    def _manual_save():
+        """人工补充数据源缺失：直接写入知识库（title 留空，id 由中文名>英文名派生）。"""
+        zh = (zh_input.value or "").strip()
+        en = (en_input.value or "").strip()
+        year = (year_input.value or "").strip()
+        score = (score_input.value or "").strip()
+        if not zh and not en:
+            ui.notify("中文名 / 英文名至少填一个", type="warning")
+            return
+        kb_upsert(zh, en, year, score, "")
+        zh_input.value = en_input.value = year_input.value = score_input.value = ""
+        _render_table()
+        ui.notify("已写入知识库", type="positive")
+
     mode_radio.on_value_change(lambda e: _render_table())
     _render_table()
 
 
-async def _run_update(config_mgr, profile, path_value, render_cb):
-    """更新知识库：遍历 path → AI 提取中英名 → 去重后逐条 fetch_info 固化。"""
+async def _run_update(config_mgr, profile, path_value, mode, render_cb):
+    """更新知识库：遍历 path → AI 提取中英名 → 去重后逐条 fetch_info 固化。
+
+    mode: "douban" 仅豆瓣源；"all" 仅豆瓣之外的其它源自纠错。
+    """
+    # 惰性导入：ai_naming 拖 LangChain、sources 拖 chromadb，只在真正更新时才加载
+    from workspaces.screen.ai_naming import extract_names
+    from workspaces.screen.sources import fetch_info, reset_breakers, SEARCH_DELAY
+
     clear_log()
     set_running("更新知识库")
+    reset_breakers()
     path = Path(path_value or "")
     if not path or not path.is_dir():
         log("  Path 未设置或目录不存在", "red")
@@ -145,12 +185,13 @@ async def _run_update(config_mgr, profile, path_value, render_cb):
     log(f"  扫描到 {len(names)} 个文件（含子文件夹）", "gray")
 
     cfg = config_mgr.get_profile_config(profile)
-    key = config_mgr.get_deepseek_key()
+    key = get_deepseek_key(config_mgr)
     if not key:
         log("  未设置 Deepseek Key（请先到「概览」设置）", "red")
         set_error()
         return
     tmdb_key = cfg.get("tmdb_api_key", "")
+    log(f"◆ 数据源模式：{'豆瓣' if mode == 'douban' else '综合（豆瓣外源）'}", "cyan")
 
     # AI 分块提取中英文名
     batch = int(cfg.get("ai_batch_size", 20)) or 20
@@ -182,7 +223,7 @@ async def _run_update(config_mgr, profile, path_value, render_cb):
             skipped += 1
             continue
         try:
-            info = await asyncio.to_thread(fetch_info, q, tmdb_key)
+            info = await asyncio.to_thread(fetch_info, q, tmdb_key, mode)
         except Exception as e:
             logger.warning("取信息失败 %s: %s", q, e)
             info = None

@@ -12,7 +12,7 @@
     - 系列、导演字段预留超链接接口
 
 主要函数：
-    build_browser(config_mgr, db) - 构建媒体浏览器 UI
+    build_browser(config_mgr, db, registry=None) - 构建媒体浏览器 UI
 """
 
 import base64
@@ -36,7 +36,7 @@ def _load_covers(total: int, render_fn):
         status_progress.set_value(0)
 
 
-def build_browser(config_mgr, db):
+def build_browser(config_mgr, db, registry=None):
     """构建媒体浏览器 UI，仅显示 Root 路径下的视频。
 
     数据流：

@@ -62,8 +62,7 @@ def fetch_tmdb(query: str, api_key: str) -> dict | None:
     try:
         data = _http_json(url)
     except Exception as e:
-        logger.warning("TMDB 查询失败 %s: %s", query, e)
-        return None
+        raise RuntimeError(f"TMDB 查询失败 {query}: {e}") from e
     results = data.get("results", []) if isinstance(data, dict) else []
     if not results:
         return None

@@ -21,6 +21,7 @@
 """
 
 import copy
+import importlib
 import json
 from pathlib import Path
 from typing import Optional
@@ -69,13 +70,22 @@ class ConfigManager:
                     data.setdefault("shared", {}).update(sh)
             except (json.JSONDecodeError, OSError):
                 pass
-        # 迁移：旧的 per-profile ai_api_key → screen 共享 deepseek_key（统一到概览后不再按 profile 存）
-        sh_screen = data.setdefault("shared", {}).setdefault("screen", {})
-        for p in WORKSPACES["screen"]["profiles"]:
-            legacy = data["profiles"].get(p, {}).pop("ai_api_key", "")
-            if legacy and not sh_screen.get("deepseek_key"):
-                sh_screen["deepseek_key"] = legacy
+        self._run_shared_migrations(data)
         return data
+
+    def _run_shared_migrations(self, data: dict) -> None:
+        """调用各 workspace 声明的 migrate_shared(profiles, shared) 钩子。
+
+        框架只按 WORKSPACES 键动态导入并调用钩子，不硬编码任何业务迁移逻辑。
+        """
+        for ws in WORKSPACES:
+            try:
+                mod = importlib.import_module(f"workspaces.{ws}.config")
+            except ModuleNotFoundError:
+                continue
+            migrate = getattr(mod, "migrate_shared", None)
+            if callable(migrate):
+                migrate(data["profiles"], data.setdefault("shared", {}))
 
     def _workspace_path(self, ws: str) -> Path:
         return self.base / "workspaces" / ws / "config.json"
@@ -100,7 +110,7 @@ class ConfigManager:
 
     def _default_config(self) -> dict:
         return {
-            "current_profile": "movie",
+            "current_profile": next(iter(PROFILE_DEFAULTS)),
             "profiles": copy.deepcopy(PROFILE_DEFAULTS),
             "shared": {},
         }
@@ -138,14 +148,14 @@ class ConfigManager:
     @property
     def current_profile(self) -> str:
         """获取当前激活的 Profile 名称。"""
-        return self._data.get("current_profile", "movie")
+        return self._data["current_profile"]
 
     @current_profile.setter
     def current_profile(self, value: str) -> None:
         """切换当前 Profile。
 
         Args:
-            value: Profile 名称（movie/tv/realshot/homework）
+            value: Profile 名称
         """
         if value not in self._data.get("profiles", {}):
             raise ValueError(f"未知 Profile: {value}")
@@ -178,17 +188,13 @@ class ConfigManager:
         self.save()
 
     def get_shared(self, ws: str, key: str, default=None):
-        """获取 workspace 级共享配置项（如 screen.deepseek_key）。"""
+        """获取 workspace 级共享配置项。"""
         return self._data.get("shared", {}).get(ws, {}).get(key, default)
 
     def set_shared(self, ws: str, key: str, value) -> None:
         """写 workspace 级共享配置项（立即落盘）。"""
         self._data.setdefault("shared", {}).setdefault(ws, {})[key] = value
         self.save()
-
-    def get_deepseek_key(self) -> str:
-        """DeepSeek Key 唯一来源：screen 共享配置。"""
-        return self.get_shared("screen", "deepseek_key", "") or ""
 
     def list_profiles(self) -> list[str]:
         """列出所有可用 Profile 名称。"""

@@ -5,17 +5,14 @@ wbsearchentities 按中文名定位条目（过滤 description 含 film/movie）
 """
 
 import json
-import logging
 import urllib.parse
 import urllib.request
-
-logger = logging.getLogger(__name__)
 
 WD_API = "https://www.wikidata.org/w/api.php"
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36"
 
 
-def _http_json(url: str, timeout: float = 15.0):
+def _http_json(url: str, timeout: float = 6.0):
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -30,8 +27,7 @@ def _find_qid(query: str) -> tuple[str | None, dict | None]:
     try:
         data = _http_json(f"{WD_API}?{params}")
     except Exception as e:
-        logger.warning("Wikidata 搜索失败 %s: %s", query, e)
-        return None, None
+        raise RuntimeError(f"Wikidata 搜索失败 {query}: {e}") from e
     for item in data.get("search", []):
         desc = (item.get("description") or "").lower()
         if any(k in desc for k in ("film", "movie", "television", "电视")):
@@ -51,8 +47,7 @@ def fetch_wikidata(query: str) -> dict | None:
     try:
         data = _http_json(f"{WD_API}?{params}")
     except Exception as e:
-        logger.warning("Wikidata 实体获取失败 %s: %s", query, e)
-        return None
+        raise RuntimeError(f"Wikidata 实体获取失败 {query}: {e}") from e
     ent = (data.get("entities") or {}).get(qid, {})
     if not isinstance(ent, dict):
         return None

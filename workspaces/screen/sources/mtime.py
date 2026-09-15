@@ -5,11 +5,8 @@
 """
 
 import json
-import logging
 import urllib.parse
 import urllib.request
-
-logger = logging.getLogger(__name__)
 
 MTIME_SEARCH_URL = "https://front-gateway.mtime.com/mtime-search/search/unionSearch2"
 _UA = (
@@ -35,8 +32,7 @@ def fetch_mtime(query: str) -> dict | None:
         with urllib.request.urlopen(req, timeout=15.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        logger.warning("时光网查询失败 %s: %s", query, e)
-        return None
+        raise RuntimeError(f"时光网查询失败 {query}: {e}") from e
     movies = (data.get("data") or {}).get("movies") or []
     if not movies:
         return None

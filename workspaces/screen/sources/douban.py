@@ -1,13 +1,10 @@
 """豆瓣数据源 — 标题 → subjectId（搜索联想）→ 详情（apizero），纯豆瓣查询，无缓存。"""
 
 import json
-import logging
 import re
 import time
 import urllib.parse
 import urllib.request
-
-logger = logging.getLogger(__name__)
 
 DOUBAN_SUGGEST_URL = "https://www.douban.com/j/search_suggest"
 APIZERO_MOVIE_URL = "https://v1.apizero.cn/api/douban-movie"
@@ -41,8 +38,7 @@ def _search_subject_id(query: str) -> tuple[str | None, dict | None]:
         try:
             data = _http_json(url)
         except Exception as e:
-            logger.warning("豆瓣搜索失败 %s: %s", query, e)
-            return None, None
+            raise RuntimeError(f"豆瓣搜索失败 {query}: {e}") from e
         cards = data.get("cards", []) if isinstance(data, dict) else []
         for card in cards:
             if not isinstance(card, dict) or card.get("type") != "movie":
@@ -73,7 +69,7 @@ def parse_apizero(data: dict) -> dict:
     score = data.get("score") or data.get("rating") or data.get("douban_score")
     try:
         if score:
-            info["score"] = f"豆{float(score):.1f}"
+            info["score"] = f"{float(score):.1f}"  # 只存数字，列头已是「豆瓣评分」
     except (TypeError, ValueError):
         pass
     year = data.get("year") or data.get("date") or data.get("pubdate")

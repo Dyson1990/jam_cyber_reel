@@ -9,7 +9,7 @@
     - 脚本扫描/运行委托 core/common/tools.py
 
 主要函数：
-    build_tools(config_mgr, db) - 构建工具页 UI
+    build_tools(config_mgr, db, registry=None) - 构建工具页 UI
 """
 
 from nicegui import run, ui
@@ -18,7 +18,7 @@ from core.common.tools import list_scripts, run_script
 from ui.state import tag
 
 
-def build_tools(config_mgr, db):
+def build_tools(config_mgr, db, registry=None):
     """构建工具页 UI。
 
     布局：左侧脚本列表，右侧源码 + 运行结果。

@@ -17,11 +17,19 @@ from nicegui import ui
 from core.common.dashboard import get_workspace_overview, get_changelog
 from core.logging_config import read_recent_logs
 from ui.state import tag, update_drawer_info
-from workspaces import workspace_of
 from workspaces._shared import parse_table_schema, parse_json_or
 
+# 概览页扩展注册表：workspace 通过 register_overview_extra() 追加专用卡片，
+# build_overview 末尾统一渲染，框架不感知具体业务扩展。
+_OVERVIEW_EXTRAS = []
 
-def build_home(config_mgr, db):
+
+def register_overview_extra(builder):
+    """注册概览页追加卡片；builder(config_mgr, db, profile)。"""
+    _OVERVIEW_EXTRAS.append(builder)
+
+
+def build_home(config_mgr, db, registry=None):
     """构建项目级首页：最新运行日志 + 更新日志。"""
     tag("home")
     ui.label("◆ HOME").classes("text-xl font-mono text-cyan-400 mb-6 glow-text")
@@ -72,7 +80,7 @@ def _line_color(line: str) -> str:
     return "text-slate-500"
 
 
-def build_overview(config_mgr, db):
+def build_overview(config_mgr, db, registry=None):
     """构建工作区概览页：当前 Profile 的统计仪表盘。"""
     data = get_workspace_overview(config_mgr, db)
     profile = data["profile"]
@@ -124,20 +132,6 @@ def build_overview(config_mgr, db):
             "text-sm font-mono text-slate-400 mt-2"
         )
 
-    # DeepSeek Key（screen 统一入口：所有访问 deepseek 的页面都从这里取 key）
-    if workspace_of(profile) == "screen":
-        with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-4 w-full mt-4"):
-            tag("deepseek-key")
-            ui.label("DeepSeek Key（全站统一）").classes("text-xs text-slate-500 font-mono")
-            key = config_mgr.get_deepseek_key()
-            key_input = ui.input(
-                value=_mask_secret(key) if key else "",
-                placeholder="未设置（输入新 Key 保存）" if not key else "输入新 Key 覆盖",
-            ).props("outlined dense dark").classes("w-full font-mono text-xs mt-2")
-            key_input.on_value_change(
-                lambda e: _save_deepseek_key(config_mgr, e.value or "", key_input),
-            )
-
     # 表结构 / 扩展配置编辑（原配置页的非功能参数，暂放概览）
     cfg = config_mgr.get_profile_config(profile)
     with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-4 w-full mt-4"):
@@ -166,6 +160,10 @@ def build_overview(config_mgr, db):
             "border border-cyan-600 rounded px-6 py-2 mt-3"
         )
 
+    # 概览页扩展（各 workspace 注册的专用卡片）
+    for build in _OVERVIEW_EXTRAS:
+        build(config_mgr, db, profile)
+
 
 def _save_schema(config_mgr, db, profile, schema_str, extra_str, status_label):
     """校验并保存当前 Profile 的表结构 / 扩展配置。"""
@@ -189,19 +187,3 @@ def _save_schema(config_mgr, db, profile, schema_str, extra_str, status_label):
     update_drawer_info()
     status_label.set_text("已保存 ✓")
     status_label.classes("text-blue-400 text-sm font-mono mt-2")
-
-
-def _mask_secret(key: str) -> str:
-    """脱敏显示 key：仅保留前 3 后 4 位。"""
-    if not key:
-        return "未设置"
-    if len(key) <= 7:
-        return "*******"
-    return f"{key[:3]}****{key[-4:]}"
-
-
-def _save_deepseek_key(config_mgr, value, key_input):
-    """录入新 key：非空才覆盖保存到 screen 共享配置，并刷新为脱敏显示。"""
-    if value:
-        config_mgr.set_shared("screen", "deepseek_key", value)
-        key_input.set_value(_mask_secret(value))

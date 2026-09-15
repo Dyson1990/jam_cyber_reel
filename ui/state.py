@@ -23,27 +23,56 @@ UI 共享状态模块 - 保存全局引用，打破循环导入。
     update_drawer_info()    - 更新左侧菜单信息
 """
 
+import importlib
 import threading
 
 from nicegui import ui
 
-from workspaces import workspace_of, workspace_menu, workspace_default_profile
+from workspaces import WORKSPACES, workspace_of, workspace_menu, workspace_default_profile
 
 # 取消标记：停止按钮设置此事件，各运行函数检查后中断
 _cancel_event = threading.Event()
 
-# 菜单项定义：page key → (图标, 中文标签)
-MENU_ITEMS = {
-    "home": ("◇", "首页"),
-    "browser": ("▤", "媒体浏览器"),
-    "tools": ("◆", "工具"),
-    "overview": ("◈", "概览"),
-    "kb": ("▥", "知识库"),
-    "config": ("⚙", "配置"),
-    "scan": ("▤", "扫描"),
-    "normalize": ("✎", "标准化"),
-    "screenshot": ("▣", "截图"),
+# 页面注册表：page key → (图标, 中文标签, "module:builder")。
+# 框架页面在此登记；各 workspace 的专用页面在 ui/workspaces/<ws>/__init__.py 的 PAGES 登记，
+# 由 _register_workspace_pages() 首次渲染时合并，框架代码不感知具体业务页。
+PAGES = {
+    "home": ("◇", "首页", "ui.home:build_home"),
+    "browser": ("▤", "媒体浏览器", "ui.browser_page:build_browser"),
+    "tools": ("◆", "工具", "ui.tools_page:build_tools"),
+    "overview": ("◈", "概览", "ui.home:build_overview"),
+    "config": ("⚙", "配置", "ui.workspaces._shared:build_config"),
 }
+
+_pages_registered = False
+
+
+def _register_workspace_pages():
+    """首次调用时合并各 workspace 的专用页面与扩展。
+
+    按 WORKSPACES 键动态导入 ui.workspaces.<ws>，不硬编码业务名；
+    每个 workspace 可声明 PAGES 字典与可选 register() 钩子（注册概览扩展等）。
+    """
+    global _pages_registered
+    if _pages_registered:
+        return
+    _pages_registered = True
+    for ws in WORKSPACES:
+        try:
+            mod = importlib.import_module(f"ui.workspaces.{ws}")
+        except ModuleNotFoundError:
+            continue
+        for key, entry in getattr(mod, "PAGES", {}).items():
+            PAGES[key] = entry
+        register = getattr(mod, "register", None)
+        if callable(register):
+            register()
+
+
+def _resolve_builder(spec: str):
+    """把 "module:attr" 解析为页面构建函数（延迟导入，打破循环引用）。"""
+    mod_name, attr = spec.split(":")
+    return getattr(importlib.import_module(mod_name), attr)
 
 
 def cancel_requested() -> bool:
@@ -70,8 +99,6 @@ def tag(name: str):
     color = "text-white" if TESTING_ENV else "text-transparent"
     ui.label(f"[{name}]").classes(f"text-xs {color} font-mono")
 
-# 页面模块延迟到 switch_page 内导入以打破循环引用
-
 # 全局 UI 引用
 content_area: ui.column = None
 profile_label: ui.label = None
@@ -90,44 +117,14 @@ workspace_menu_container: ui.column = None
 
 
 def switch_page(page: str):
-    """切换右侧内容区页面。
-
-    实现机制：
-        content_area.clear() 清除当前页面元素，
-        然后用 with content_area: 块重建目标页面。
-
-    Args:
-        page: 目标页面名称（home/config/sync/browser/tools）
-    """
-    from ui.home import build_home, build_overview
-    from ui.browser_page import build_browser
-    from ui.tools_page import build_tools
-    from ui.workspaces._shared import build_config
-    from ui.workspaces.screen.scan_page import build_scan
-    from ui.workspaces.screen.normalize_page import build_normalize
-    from ui.workspaces.screen.screenshot_page import build_screenshot
-    from ui.workspaces.screen.kb_page import build_kb
+    """切换右侧内容区页面。"""
+    _register_workspace_pages()
+    _, _, spec = PAGES[page]
+    builder = _resolve_builder(spec)
 
     content_area.clear()
     with content_area:
-        if page == "home":
-            build_home(config_mgr, db_instance)
-        elif page == "overview":
-            build_overview(config_mgr, db_instance)
-        elif page == "config":
-            build_config(config_mgr, registry)
-        elif page == "scan":
-            build_scan(config_mgr, db_instance, registry)
-        elif page == "normalize":
-            build_normalize(config_mgr, db_instance, registry)
-        elif page == "screenshot":
-            build_screenshot(config_mgr, db_instance, registry)
-        elif page == "kb":
-            build_kb(config_mgr, db_instance, registry)
-        elif page == "browser":
-            build_browser(config_mgr, db_instance)
-        elif page == "tools":
-            build_tools(config_mgr, db_instance)
+        builder(config_mgr, db_instance, registry)
 
     status_text.set_text("就绪") if status_text else None
     if status_progress:
@@ -138,12 +135,13 @@ def render_workspace_menu():
     """重建第③段专用选项菜单（按当前 workspace 的专用项）。"""
     if workspace_menu_container is None:
         return
+    _register_workspace_pages()
     workspace_menu_container.clear()
     key = workspace_of(config_mgr.current_profile)
     with workspace_menu_container:
         # 概览固定为每个工作区的首个入口
         for page in ["overview", *workspace_menu(key)]:
-            icon, label = MENU_ITEMS[page]
+            icon, label = PAGES[page][:2]
             btn = ui.button(
                 f"{icon}  {label}",
                 on_click=lambda _, p=page: switch_page(p),
