@@ -11,7 +11,7 @@ import logging
 import time
 
 from ..store import kb_lookup, kb_upsert
-from .douban import fetch_douban, title_query, SEARCH_DELAY
+from .douban import fetch_douban, title_query, SEARCH_DELAY, extract_year
 from .mtime import fetch_mtime
 from .tmdb import fetch_tmdb
 from .wikidata import fetch_wikidata
@@ -74,7 +74,7 @@ def _persist(info: dict, query: str, raw: dict | None = None) -> dict:
     return info
 
 
-def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto") -> dict | None:
+def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto", year: str = "") -> dict | None:
     """片名 → {zh,en,year,score,raw}。
 
     mode 决定用哪些源：
@@ -89,7 +89,7 @@ def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto") -> dict | Non
     # 各源一手数据无删减收集（无论是否参与最终结果，都固化进知识库）
     raw: dict = {}
     if mode != "all":
-        d = _call("douban", lambda: fetch_douban(query))
+        d = _call("douban", lambda: fetch_douban(query, year))
         if d and d.get("raw"):
             raw["douban"] = d["raw"]
         if d and d.get("zh") and d.get("en") and d.get("year"):
@@ -131,7 +131,7 @@ def fetch_infos(names: list[str], tmdb_key: str = "") -> dict[str, dict]:
         if not q:
             continue
         try:
-            info = fetch_info(q, tmdb_key)
+            info = fetch_info(q, tmdb_key, year=extract_year(n))
         except Exception as e:
             logger.warning("取信息失败 %s: %s", q, e)
         else:

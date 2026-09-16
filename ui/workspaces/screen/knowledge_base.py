@@ -156,7 +156,7 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
     """
     # 惰性导入：ai_naming 拖 LangChain、sources 拖 chromadb，只在真正更新时才加载
     from workspaces.screen.normalize import extract_names
-    from workspaces.screen.knowledge_base.sources import fetch_info, reset_breakers, SEARCH_DELAY
+    from workspaces.screen.knowledge_base.sources import fetch_info, reset_breakers, SEARCH_DELAY, extract_year
 
     clear_log()
     set_running("更新知识库")
@@ -235,7 +235,7 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
             skipped += 1
             continue
         try:
-            info = await asyncio.to_thread(fetch_info, q, tmdb_key, mode)
+            info = await asyncio.to_thread(fetch_info, q, tmdb_key, mode, extract_year(name))
         except Exception as e:
             logger.warning("取信息失败 %s: %s", q, e)
             info = None

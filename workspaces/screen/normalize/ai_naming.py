@@ -46,7 +46,9 @@ RULES: list[dict[str, str]] = [
     {
         "topic": "英文名",
         "content": "来源=原文件名或查询补充，必填。原文件名有英文名则提取；没有时取「## 查询结果」给出的英文名；"
-        "两者都没有则该文件跳过并报错。空格改下划线 _，英文冒号 : 改中文冒号 ：。",
+        "两者都没有则该文件跳过并报错。空格改下划线 _；英文冒号（连其后空格）合并成一个中文冒号 ：；"
+        "连字符/破折号（- – —）连两侧空格合并成一个连字符 -，均不残留多余下划线"
+        "（Mission: Impossible - The Final Reckoning → Mission：Impossible-The_Final_Reckoning）。",
     },
     {
         "topic": "年份",
@@ -58,7 +60,8 @@ RULES: list[dict[str, str]] = [
         "content": "来源=原文件名，可空。统一译为中文「XXX版」，同义词归一化（左→右）："
         "EXTENDED/Extended.Cut/加长版→加长版；Director's.Cut/导演剪切版/导演剪辑版→导演剪辑版；"
         "完整版→完整版；IMAX→IMAX版；剧场版→剧场版；重映版→重映版；特别版→特别版；"
-        "Unrated→未分级版；REMASTERED→重制版；v2→修正版；映射表之外一律删除。",
+        "Unrated→未分级版；REMASTERED→重制版；v2→修正版；映射表之外一律删除。"
+        "多个版本信息并存时用顿号、分隔（如 加长版、重制版），不用点号。",
     },
     {
         "topic": "豆瓣评分",
@@ -67,8 +70,8 @@ RULES: list[dict[str, str]] = [
     {
         "topic": "视频参数",
         "content": "来源=原文件名，可空。只保留已有参数：分辨率 1080p/2160p/720p/1920x800p；编码 x264/x265/H264/H265；"
-        "片源 BluRay/WEB-DL/BD/BDrip/ATVP；位深 10bit；杜比视界 DV；无法分离的音频编码（.AAC.2AUDIO.CHS.ENG）。"
-        "粘合参数用 . 拆开并统一小写（BD1080P → BD.1080p）。",
+        "片源 BluRay/WEB-DL/BD/BDrip/ATVP；位深 10bit；杜比视界 DV；音频编码 .AAC.2AUDIO（2AUDIO=双音轨）。"
+        "粘合参数用 . 拆开并统一小写（BD1080P → BD.1080p）。字幕语种（CHS/ENG 等）不算视频参数。",
     },
     {
         "topic": "删除参数",
@@ -76,8 +79,8 @@ RULES: list[dict[str, str]] = [
     },
     {
         "topic": "字幕",
-        "content": "来源=原文件名，必填。中英字幕/中英双字/CHS-ENG → .中英字幕；特效中英字幕 → .特效中英字幕；"
-        "修正特效中英字幕 → .修正特效中英字幕；没有任何字幕标记则写 .无字幕。",
+        "content": "来源=原文件名，必填。CHS=中文、ENG=英文；中英字幕/中英双字/CHS.ENG/CHS-ENG → .中英字幕；"
+        "特效中英字幕 → .特效中英字幕；修正特效中英字幕 → .修正特效中英字幕；没有任何字幕标记则写 .无字幕。",
     },
     {
         "topic": "清理",
@@ -90,7 +93,7 @@ RULES: list[dict[str, str]] = [
         "The.Pursuit.of.Happyness.2006.BluRay.1080p.LPCM5.1.x265.10bit-DreamHD.mkv（查询给中文名 当幸福来敲门）→ "
         "当幸福来敲门.The_Pursuit_of_Happyness.2006.BluRay.1080p.x265.10bit.无字幕.mkv；"
         "海上钢琴师(蓝光国英双音轨170分钟加长版).The.Legend.of.1900.Extended.Cut.1998.BD-1080p.X264.AAC.2AUDIO.CHS.ENG-UUMp4.mp4 → "
-        "海上钢琴师.The_Legend_of_1900.1998.加长版.BD-1080p.X264.AAC.2AUDIO.CHS.ENG.无字幕.mp4；"
+        "海上钢琴师.The_Legend_of_1900.1998.加长版.BD-1080p.X264.AAC.2AUDIO.中英字幕.mp4；"
         "利刃出鞘2.1080p.BD中英双字[66影视www.66Ys.Co].mp4（查询给英文名 Glass Onion、年份2022、评分「豆6.6」）→ "
         "利刃出鞘2.Glass_Onion.2022.「豆6.6」.1080p.BD.中英字幕.mp4；"
         "xxx.1080p.mkv（文件名与查询都给不出中文名/英文名/年份）→ 不写入映射，报错：缺中文名/英文名/年份。",

@@ -31,8 +31,11 @@ def _http_json(url: str, timeout: float = 8.0):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _search_subject_id(query: str) -> tuple[str | None, dict | None]:
-    """标题 → (subjectId, 联想原始 JSON)；空结果延时重试。"""
+def _search_subject_id(query: str, year: str = "") -> tuple[str | None, dict | None]:
+    """标题 → (subjectId, 联想原始 JSON)；空结果延时重试。
+
+    year 提供时优先选年份匹配的卡片，避免同名多版（2010 动画 vs 2025 真人）误配。
+    """
     url = f"{DOUBAN_SUGGEST_URL}?q={urllib.parse.quote(query)}"
     for attempt in range(3):
         try:
@@ -40,12 +43,19 @@ def _search_subject_id(query: str) -> tuple[str | None, dict | None]:
         except Exception as e:
             raise RuntimeError(f"豆瓣搜索失败 {query}: {e}") from e
         cards = data.get("cards", []) if isinstance(data, dict) else []
+        movie_cards = []
         for card in cards:
             if not isinstance(card, dict) or card.get("type") != "movie":
                 continue
             m = re.search(r"/subject/(\d+)", card.get("url") or "")
             if m:
-                return m.group(1), data
+                movie_cards.append((card, m.group(1)))
+        if movie_cards:
+            if year:
+                for card, sid in movie_cards:
+                    if str(card.get("year") or "") == year:
+                        return sid, data
+            return movie_cards[0][1], data
         if attempt < 2:
             time.sleep(SEARCH_DELAY)
     return None, None
@@ -110,9 +120,15 @@ def title_query(filename: str) -> str:
     return " ".join(out)
 
 
-def fetch_douban(query: str) -> dict | None:
+def extract_year(filename: str) -> str:
+    """从文件名提取 4 位年份（19xx/20xx），无则空串；用于同名多版消歧。"""
+    m = re.search(r"(?:19|20)\d{2}", filename)
+    return m.group(0) if m else ""
+
+
+def fetch_douban(query: str, year: str = "") -> dict | None:
     """纯豆瓣：片名 → {zh, en, score, year, raw}；无缓存，供上层包装知识库。"""
-    sid, suggest_raw = _search_subject_id(query)
+    sid, suggest_raw = _search_subject_id(query, year)
     if not sid:
         return None
     info = _apizero_info(sid)
