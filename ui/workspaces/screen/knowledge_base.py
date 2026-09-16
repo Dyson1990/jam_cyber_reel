@@ -15,9 +15,9 @@ from nicegui import ui
 
 from core.files import VIDEO_EXTENSIONS
 from core.logging_config import get_logger
-from workspaces.screen.config import get_deepseek_key
-from workspaces.screen.kb import kb_list, kb_lookup, kb_upsert
-from workspaces.screen.sources.douban import parse_apizero
+from workspaces.screen.overview import get_deepseek_key
+from workspaces.screen.knowledge_base import kb_list, kb_lookup, kb_upsert
+from workspaces.screen.knowledge_base.sources.douban import parse_apizero
 from ui.state import tag
 from ui.workspaces.screen._shared import (
     log, clear_log, set_running, set_ready, set_error,
@@ -164,8 +164,8 @@ async def _run_update(config_mgr, profile, path_value, mode, render_cb):
     mode: "douban" 仅豆瓣源；"all" 仅豆瓣之外的其它源自纠错。
     """
     # 惰性导入：ai_naming 拖 LangChain、sources 拖 chromadb，只在真正更新时才加载
-    from workspaces.screen.ai_naming import extract_names
-    from workspaces.screen.sources import fetch_info, reset_breakers, SEARCH_DELAY
+    from workspaces.screen.normalize import extract_names
+    from workspaces.screen.knowledge_base.sources import fetch_info, reset_breakers, SEARCH_DELAY
 
     clear_log()
     set_running("更新知识库")

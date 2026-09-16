@@ -17,7 +17,7 @@ from pathlib import Path
 from nicegui import ui
 
 from core.logging_config import get_logger
-from core.screenshots import capture_one_video
+from workspaces.screen.screenshot import capture_one_video
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
     log, clear_log, set_running, set_ready, set_error,

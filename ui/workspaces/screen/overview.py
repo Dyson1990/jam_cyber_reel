@@ -3,7 +3,7 @@
 from nicegui import ui
 
 from ui.state import tag
-from workspaces.screen.config import get_deepseek_key, set_deepseek_key
+from workspaces.screen.overview import get_deepseek_key, set_deepseek_key
 
 
 def build_deepseek_card(config_mgr, db, profile):

@@ -13,7 +13,7 @@ import chromadb
 
 logger = logging.getLogger(__name__)
 
-_KB_DIR = Path(__file__).resolve().parent / "kb"
+_KB_DIR = Path(__file__).resolve().parent / "storage"
 
 # chromadb 1.x 要求每条记录必含 documents；我们只按 metadata 精确过滤、从不做向量检索，
 # 故显式传入固定向量，避免触发默认 ONNX 嵌入模型首次联网下载。

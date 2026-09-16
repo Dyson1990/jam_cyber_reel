@@ -3,10 +3,10 @@
 # 专用页面注册：page key → (图标, 标签, "module:builder")。
 # 菜单键顺序由 workspaces/__init__.py 的 WORKSPACES["screen"]["menu"] 决定。
 PAGES = {
-    "scan": ("▤", "扫描", "ui.workspaces.screen.scan_page:build_scan"),
-    "normalize": ("✎", "标准化", "ui.workspaces.screen.normalize_page:build_normalize"),
-    "screenshot": ("▣", "截图", "ui.workspaces.screen.screenshot_page:build_screenshot"),
-    "kb": ("▥", "知识库", "ui.workspaces.screen.kb_page:build_kb"),
+    "scan": ("▤", "扫描", "ui.workspaces.screen.scan:build_scan"),
+    "normalize": ("✎", "标准化", "ui.workspaces.screen.normalize:build_normalize"),
+    "screenshot": ("▣", "截图", "ui.workspaces.screen.screenshot:build_screenshot"),
+    "kb": ("▥", "知识库", "ui.workspaces.screen.knowledge_base:build_kb"),
 }
 
 

@@ -10,11 +10,11 @@
 import logging
 import time
 
-from workspaces.screen.kb import kb_lookup, kb_upsert
-from workspaces.screen.sources.douban import fetch_douban, title_query, SEARCH_DELAY
-from workspaces.screen.sources.mtime import fetch_mtime
-from workspaces.screen.sources.tmdb import fetch_tmdb
-from workspaces.screen.sources.wikidata import fetch_wikidata
+from ..store import kb_lookup, kb_upsert
+from .douban import fetch_douban, title_query, SEARCH_DELAY
+from .mtime import fetch_mtime
+from .tmdb import fetch_tmdb
+from .wikidata import fetch_wikidata
 
 logger = logging.getLogger(__name__)
 

@@ -59,16 +59,6 @@ PROFILES = {
 DEEPSEEK_KEY = "deepseek_key"
 
 
-def get_deepseek_key(config_mgr) -> str:
-    """screen 统一读取 DeepSeek Key（唯一来源：workspace 共享配置）。"""
-    return config_mgr.get_shared("screen", DEEPSEEK_KEY, "") or ""
-
-
-def set_deepseek_key(config_mgr, value: str) -> None:
-    """screen 统一写入 DeepSeek Key。"""
-    config_mgr.set_shared("screen", DEEPSEEK_KEY, value)
-
-
 def migrate_shared(profiles: dict, shared: dict) -> None:
     """迁移：旧的 per-profile ai_api_key → screen 共享 deepseek_key。"""
     sh = shared.setdefault("screen", {})

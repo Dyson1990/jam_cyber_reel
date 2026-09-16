@@ -22,11 +22,11 @@ from nicegui import ui
 from core.files import VIDEO_EXTENSIONS
 from core.logging_config import get_log_dir, get_logger
 from workspaces._shared import parse_naming_rules
-from workspaces.screen.ai_naming import (
+from workspaces.screen.normalize import (
     build_prompt, build_fix_prompt, call_deepseek,
 )
-from workspaces.screen.config import get_deepseek_key
-from workspaces.screen.sources import fetch_infos
+from workspaces.screen.overview import get_deepseek_key
+from workspaces.screen.knowledge_base.sources import fetch_infos
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
     log, clear_log, set_running, set_ready, set_error,
