@@ -28,37 +28,41 @@ logger = logging.getLogger(__name__)
 RULES: list[dict[str, str]] = [
     {
         "topic": "总原则",
-        "content": "只使用原文件名已有字段或「## 查询结果」给出的字段；两者都没有则跳过该槽位，"
-        "绝不臆造年份、评分、片名等任何信息。",
+        "content": "只使用原文件名已有字段或「## 查询结果」给出的字段，绝不臆造年份、评分、片名等任何信息。"
+        "「中文名/英文名/年份/字幕」四槽位必填：文件名与查询结果都取不到时，该文件不写入映射，"
+        "改为在 _errors 中报告错误；其余槽位缺值则直接跳过。",
     },
     {
         "topic": "标准格式",
-        "content": "输出文件名按固定槽位模板排列，缺值槽位直接跳过："
-        "[中文名].[英文名].[年份].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]。",
+        "content": "输出文件名按固定槽位模板排列："
+        "[中文名].[英文名].[年份].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]。"
+        "中文名/英文名/年份/字幕必填，版本信息/豆瓣评分/视频参数缺值跳过。",
     },
     {
         "topic": "中文名",
-        "content": "来源=原文件名或查询补充，可空。原文件名有中文名则提取；没有时若「## 查询结果」给出则采用；"
-        "都没有则跳过。副标题保持原样，不改标点。",
+        "content": "来源=原文件名或查询补充，必填。原文件名有中文名则提取；没有时取「## 查询结果」给出的中文名；"
+        "两者都没有则该文件跳过并报错。副标题保持原样，不改标点。",
     },
     {
         "topic": "英文名",
-        "content": "来源=原文件名或查询补充，可空。原文件名有英文名则提取；没有时若「## 查询结果」给出则采用；"
-        "都没有则跳过。空格改下划线 _，英文冒号 : 改中文冒号 ：。",
+        "content": "来源=原文件名或查询补充，必填。原文件名有英文名则提取；没有时取「## 查询结果」给出的英文名；"
+        "两者都没有则该文件跳过并报错。空格改下划线 _，英文冒号 : 改中文冒号 ：。",
     },
     {
         "topic": "年份",
-        "content": "来源=原文件名或查询补充，可空，格式 .YYYY。原文件名有年份则用原年份；"
-        "没有时，若「## 查询结果」给出该片年份则采用；都没有则跳过。",
+        "content": "来源=原文件名或查询补充，必填，格式 .YYYY。原文件名有年份则用原年份；"
+        "没有时取「## 查询结果」给出的年份；两者都没有则该文件跳过并报错。",
     },
     {
         "topic": "版本信息",
-        "content": "来源=原文件名，可空。保留加长版、完整版、EXTENDED、导演剪辑版、导演剪切版、Director's Cut、"
-        "IMAX版、剧场版、重映版、特别版、v2、Unrated、REMASTERED 等；中英等价只保留中文。",
+        "content": "来源=原文件名，可空。统一译为中文「XXX版」，同义词归一化（左→右）："
+        "EXTENDED/Extended.Cut/加长版→加长版；Director's.Cut/导演剪切版/导演剪辑版→导演剪辑版；"
+        "完整版→完整版；IMAX→IMAX版；剧场版→剧场版；重映版→重映版；特别版→特别版；"
+        "Unrated→未分级版；REMASTERED→重制版；v2→修正版；映射表之外一律删除。",
     },
     {
         "topic": "豆瓣评分",
-        "content": "来源=查询补充，可空，格式 豆{一位小数}（如 豆8.8）。「## 查询结果」给出评分才写，没给则跳过。",
+        "content": "来源=查询补充，可空，格式 「豆{一位小数}」（如「豆8.5」）。「## 查询结果」给出评分才写，没给则跳过。",
     },
     {
         "topic": "视频参数",
@@ -72,7 +76,7 @@ RULES: list[dict[str, str]] = [
     },
     {
         "topic": "字幕",
-        "content": "来源=原文件名。中英字幕/中英双字/CHS-ENG → .中英字幕；特效中英字幕 → .特效中英字幕；"
+        "content": "来源=原文件名，必填。中英字幕/中英双字/CHS-ENG → .中英字幕；特效中英字幕 → .特效中英字幕；"
         "修正特效中英字幕 → .修正特效中英字幕；没有任何字幕标记则写 .无字幕。",
     },
     {
@@ -81,19 +85,23 @@ RULES: list[dict[str, str]] = [
     },
     {
         "topic": "示例",
-        "content": "返老还童.1080p.国英双语.BD中英双字[66影视www.66Ys.Co].mp4 → 返老还童.1080p.BD.中英字幕.mp4；"
-        "The.Pursuit.of.Happyness.2006.BluRay.1080p.LPCM5.1.x265.10bit-DreamHD.mkv → "
-        "The_Pursuit_of_Happyness.2006.BluRay.1080p.x265.10bit.无字幕.mkv；"
+        "content": "爱乐之城.2017.BD1080p.国英双语.中英双字.mp4（查询给英文名 La La Land）→ "
+        "爱乐之城.La_La_Land.2017.BD.1080p.中英字幕.mp4；"
+        "The.Pursuit.of.Happyness.2006.BluRay.1080p.LPCM5.1.x265.10bit-DreamHD.mkv（查询给中文名 当幸福来敲门）→ "
+        "当幸福来敲门.The_Pursuit_of_Happyness.2006.BluRay.1080p.x265.10bit.无字幕.mkv；"
         "海上钢琴师(蓝光国英双音轨170分钟加长版).The.Legend.of.1900.Extended.Cut.1998.BD-1080p.X264.AAC.2AUDIO.CHS.ENG-UUMp4.mp4 → "
-        "海上钢琴师.The_Legend_of_1900.1998.加长版.BD-1080p.X264.AAC.2AUDIO.CHS.ENG.mp4；"
-        "利刃出鞘2.1080p.BD中英双字[66影视www.66Ys.Co].mp4（查询给英文名 Glass Onion、年份2022、评分豆6.6）→ "
-        "利刃出鞘2.Glass_Onion.2022.豆6.6.1080p.BD.中英字幕.mp4。",
+        "海上钢琴师.The_Legend_of_1900.1998.加长版.BD-1080p.X264.AAC.2AUDIO.CHS.ENG.无字幕.mp4；"
+        "利刃出鞘2.1080p.BD中英双字[66影视www.66Ys.Co].mp4（查询给英文名 Glass Onion、年份2022、评分「豆6.6」）→ "
+        "利刃出鞘2.Glass_Onion.2022.「豆6.6」.1080p.BD.中英字幕.mp4；"
+        "xxx.1080p.mkv（文件名与查询都给不出中文名/英文名/年份）→ 不写入映射，报错：缺中文名/英文名/年份。",
     },
 ]
 
 _JSON_INSTRUCTION = (
     "\n\n## 输出要求\n"
-    "仅输出一个 JSON 字典，key 为原文件名，value 为标准化后的文件名，"
+    "仅输出一个 JSON 字典：key 为原文件名，value 为标准化后的文件名；"
+    "必填槽位取不到、无法标准化的文件不要作为 key 写入映射，"
+    "改放入 \"_errors\" 键，值为数组，每项 {\"file\": 原文件名, \"reason\": 缺失说明}；"
     "不要输出任何其他文字或解释。"
 )
 
@@ -193,15 +201,19 @@ def build_fix_prompt(filenames: list[str], infos: dict[str, dict] | None = None)
     )
 
 
-def call_deepseek(api_key: str, prompt: str) -> dict[str, str]:
-    """以 ChatDeepSeek 生成映射，返回 {原文件名: 新文件名}。"""
+def call_deepseek(api_key: str, prompt: str) -> tuple[dict[str, str], list[dict]]:
+    """以 ChatDeepSeek 生成映射，返回 ({原文件名: 新文件名}, [必填缺失被跳过的条目])。"""
     llm = ChatDeepSeek(model=DEEPSEEK_MODEL, api_key=api_key, temperature=0)
     content = llm.invoke(prompt).content
     return _parse_result(content)
 
 
-def _parse_result(content: str) -> dict[str, str]:
-    """从返回文本提取 JSON 字典（容忍 ```json 代码块包裹）。"""
+def _parse_result(content: str) -> tuple[dict[str, str], list[dict]]:
+    """从返回文本提取 {原文件名:新文件名} 与 _errors 错误列表（容忍 ```json 代码块包裹）。
+
+    设计理由：必填槽位取不到的文件不写入映射，模型改放在 _errors 键下，此处拆开返回，
+    避免 _errors 被误当成一条映射去重命名。
+    """
     text = (content or "").strip()
     if text.startswith("```"):
         text = text.strip("`")
@@ -213,7 +225,10 @@ def _parse_result(content: str) -> dict[str, str]:
     data = json.loads(text[start:end + 1])
     if not isinstance(data, dict):
         raise ValueError("返回内容不是字典")
-    return {str(k): str(v) for k, v in data.items()}
+    errors = data.pop("_errors", None)
+    if not isinstance(errors, list):
+        errors = []
+    return {str(k): str(v) for k, v in data.items()}, errors
 
 
 _EXTRACT_INSTRUCTION = (

@@ -24,7 +24,6 @@ from core.files import (
     scan_videos,
     VIDEO_EXTENSIONS,
 )
-from core.sync import build_db as _build_db, diff_db as _diff_db, sync_db as _sync_db
 from workspaces import workspace_of
 
 
@@ -149,26 +148,6 @@ class ProfileBase:
         if not batch:
             return [{"status": "日期范围内无记录"}]
         return self.rollback_records(batch, source_dir=source_dir)
-
-    # === db sync ===
-
-    def build_db(self) -> int:
-        return _build_db(self.config.get("root", ""), self.db, self.profile_name)
-
-    def diff_db(self, exclude_dirs: Optional[list[str]] = None) -> dict:
-        return _diff_db(
-            self.config.get("root", ""), self.db, self.profile_name,
-            exclude_dirs=exclude_dirs,
-        )
-
-    def sync_db(
-        self, exclude_dirs: Optional[list[str]] = None, crid_pattern: str = "",
-        added: Optional[list] = None,
-    ) -> int:
-        return _sync_db(
-            self.config.get("root", ""), self.db, self.profile_name,
-            exclude_dirs=exclude_dirs, crid_pattern=crid_pattern, added=added,
-        )
 
 
 def _apply_rules(name: str, rules: dict) -> str:

@@ -1,5 +1,5 @@
 """概览（screen）— DeepSeek Key 管理（全站统一，仅 screen 展示）。"""
-from workspaces.screen.config import DEEPSEEK_KEY
+from workspaces.screen.schema import DEEPSEEK_KEY
 
 
 def get_deepseek_key(config_mgr) -> str:

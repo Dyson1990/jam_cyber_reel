@@ -156,6 +156,9 @@ class Database:
             "mv_path TEXT NOT NULL UNIQUE",
             "cover BLOB",
             "crid TEXT DEFAULT ''",
+            "source TEXT DEFAULT ''",
+            "zh TEXT DEFAULT ''",
+            "en TEXT DEFAULT ''",
             "added_time TEXT DEFAULT (datetime('now','localtime'))",
         ]
         for col in columns:
@@ -390,6 +393,14 @@ class Database:
         table = f"media_{profile}"
         return self.fetchall(
             f"SELECT * FROM {table} ORDER BY mv_path, title"
+        )
+
+    def set_media_names(self, profile: str, mv_path: str, zh: str, en: str) -> None:
+        """写回 AI 提取的中/英文名，供知识库下次更新复用（避免重复提取）。"""
+        table = f"media_{profile}"
+        self.execute(
+            f"UPDATE {table} SET zh=?, en=? WHERE mv_path=?",
+            (zh, en, mv_path),
         )
 
     def get_media_count(self, profile: str) -> int:

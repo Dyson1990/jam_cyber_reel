@@ -18,7 +18,7 @@ Thumbs.db
 .claude/
 
 # 运行时配置 / 状态（含密钥）
-workspaces/*/config.json
+workspaces/*/overrides.json
 workspaces/*/knowledge_base/storage/
 core/state.json
 

@@ -1,25 +1,23 @@
 """
 标准化模块（screen）— 文件名规范化 + 重命名。
 
-对应原同步页的「文件名更新」卡片，并新增命名方式单选：
-    - 映射命名（原逻辑）：dict 映射 str.replace
-    - AI 命名（骨架）：deepseek key + 提示词，逻辑待接入
+命名方式单选：
+    - 映射命名：dict 映射 str.replace
+    - AI 命名：deepseek 生成映射（from → to）
+    - AI 修正：检查 root 中已检查文件的可查询槽位（原地改名）
 
-共享参数（输入即保存到 config_manager）：
-    from / to            — 两种命名方式共用
-    naming_mode          — "mapping" | "ai"
-    naming_rules         — 映射命名规则（JSON dict）
-    ai_prompt           — AI 命名提示词（DeepSeek Key 统一在概览设置）
+源文件不再自行扫盘：from / root 文件由「扫描」写入数据库（含来源），
+本页直接按来源从数据库取文件路径；To 仍为通用参数（config.py）。
 """
 
 import asyncio
 import json
 
+from datetime import datetime
 from pathlib import Path
 
 from nicegui import ui
 
-from core.files import VIDEO_EXTENSIONS
 from core.logging_config import get_log_dir, get_logger
 from workspaces._shared import parse_naming_rules
 from workspaces.screen.normalize import (
@@ -27,26 +25,14 @@ from workspaces.screen.normalize import (
 )
 from workspaces.screen.overview import get_deepseek_key
 from workspaces.screen.knowledge_base.sources import fetch_infos
+from workspaces.screen.scan import media_files
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
     log, clear_log, set_running, set_ready, set_error,
-    run_button, build_profile_radio, build_log_panel,
+    run_button, build_profile_radio, build_log_panel, mask_key, save_tmdb_key,
 )
 
 logger = get_logger(__name__)
-
-# AI 修正扫描：视频 + 压缩文件（看过的电影常被压缩）
-_ARCHIVE_EXT = {".zip", ".rar", ".7z"}
-
-
-def _scan_top_level(path: Path) -> list[Path]:
-    """扫描 path 下（仅本层，不递归）的视频与压缩文件。"""
-    if not path or not path.is_dir():
-        return []
-    return [
-        f for f in path.iterdir()
-        if f.is_file() and f.suffix.lower() in (VIDEO_EXTENSIONS | _ARCHIVE_EXT)
-    ]
 
 
 def build_normalize(config_mgr, db, registry):
@@ -88,17 +74,15 @@ def build_normalize(config_mgr, db, registry):
                     top_container.clear()
                     sub_container.clear()
                     with top_container:
-                        if method_radio.value == "ai_fix":
-                            _build_path_row(config_mgr, profile)
-                        else:
-                            _build_from_to_row(config_mgr, profile)
+                        if method_radio.value != "ai_fix":
+                            _build_to_row(config_mgr, profile)
                     with sub_container:
                         if method_radio.value == "ai":
-                            _build_ai_naming(config_mgr, profile, handler)
+                            _build_ai_naming(config_mgr, profile, handler, db)
                         elif method_radio.value == "ai_fix":
-                            _build_ai_fix(config_mgr, profile, handler)
+                            _build_ai_fix(config_mgr, profile, handler, db)
                         else:
-                            _build_mapping_naming(handler, config_mgr, profile)
+                            _build_mapping_naming(handler, config_mgr, profile, db)
 
                 _render()
 
@@ -110,16 +94,9 @@ def _on_method_change(config_mgr, profile, value, render):
     render()
 
 
-def _build_from_to_row(config_mgr, profile):
-    """映射命名 / AI 命名共享的 From/To 输入（输入即保存）。"""
+def _build_to_row(config_mgr, profile):
+    """标准化后的目标目录 To（输入即保存；from 源文件由数据库提供）。"""
     cfg = config_mgr.get_profile_config(profile)
-    with ui.row().classes("gap-2 items-center w-full mb-3"):
-        ui.label("From:").classes("text-xs text-slate-500 font-mono w-20")
-        ui.input(value=cfg.get("from", ""), placeholder="D:/Media/From").classes(
-            "flex-1 font-mono text-xs"
-        ).props("outlined dense dark").on_value_change(
-            lambda e: config_mgr.update_profile_config(profile, "from", e.value or ""),
-        )
     with ui.row().classes("gap-2 items-center w-full mb-4"):
         ui.label("To:").classes("text-xs text-slate-500 font-mono w-20")
         ui.input(value=cfg.get("to", ""), placeholder="D:/Media/To").classes(
@@ -129,24 +106,10 @@ def _build_from_to_row(config_mgr, profile):
         )
 
 
-def _build_path_row(config_mgr, profile):
-    """AI 修正的单一路径输入（替代 From/To）。"""
-    cfg = config_mgr.get_profile_config(profile)
-    with ui.row().classes("gap-2 items-center w-full mb-4"):
-        ui.label("Path:").classes("text-xs text-slate-500 font-mono w-20")
-        ui.input(value=cfg.get("ai_fix_path", ""), placeholder="D:/Media/看过").classes(
-            "flex-1 font-mono text-xs"
-        ).props("outlined dense dark").on_value_change(
-            lambda e: config_mgr.update_profile_config(
-                profile, "ai_fix_path", e.value or "",
-            ),
-        )
-
-
 def _build_rollback_row(handler, source_key="from"):
     """回滚按钮行：回滚上一批 + 批量回滚（含日期范围）排在一行。
 
-    source_key 指定回滚源目录的配置键（AI 命名用 "from"，AI 修正用 "ai_fix_path"）。
+    source_key 指定回滚目标目录的配置键（映射/AI 命名用 "from"，AI 修正用 "root"）。
     """
     with ui.row().classes("gap-2 items-center mt-3"):
         run_button(
@@ -167,7 +130,7 @@ def _build_rollback_row(handler, source_key="from"):
         )
 
 
-def _build_mapping_naming(handler, config_mgr, profile):
+def _build_mapping_naming(handler, config_mgr, profile, db):
     """映射命名页面：命名规则 + 文件名更新 / 回滚。"""
     cfg = config_mgr.get_profile_config(profile)
     rules_str = json.dumps(cfg.get("naming_rules", {}), ensure_ascii=False, indent=2)
@@ -181,27 +144,26 @@ def _build_mapping_naming(handler, config_mgr, profile):
     )
 
     with ui.row().classes("gap-4 mt-4"):
-        run_button("▶ 文件名更新", "cyan", lambda: _run_rename(handler))
+        run_button("▶ 文件名更新", "cyan", lambda: _run_rename(handler, db))
 
     _build_rollback_row(handler)
 
 
-def _build_ai_naming(config_mgr, profile, handler):
-    """AI 命名页面：deepseek key（脱敏显示）+ 提示词 + 生成/预览/应用三按钮。"""
+def _build_ai_naming(config_mgr, profile, handler, db):
+    """AI 命名页面：TMDB key（脱敏显示）+ 提示词 + 生成/预览/应用三按钮。"""
     cfg = config_mgr.get_profile_config(profile)
 
     tag("naming-ai")
     ui.label("AI 命名").classes("text-xs text-cyan-500 font-mono mb-2")
 
-
     tmdb_key = cfg.get("tmdb_api_key", "")
     with ui.row().classes("gap-2 items-center w-full mb-3"):
         ui.label("TMDB Key:").classes("text-xs text-slate-500 font-mono w-24")
         tmdb_input = ui.input(
-            value=_mask_key(tmdb_key) if tmdb_key else "",
+            value=mask_key(tmdb_key) if tmdb_key else "",
             placeholder="未设置（免费 Key，英文名/年份兜底）" if not tmdb_key else "输入新 Key 覆盖",
         ).props("outlined dense dark").classes("flex-1 font-mono text-xs").on_value_change(
-            lambda e: _save_tmdb_key(config_mgr, profile, e.value or "", tmdb_input),
+            lambda e: save_tmdb_key(config_mgr, profile, e.value or "", tmdb_input),
         )
 
     with ui.row().classes("gap-2 items-center w-full mb-3"):
@@ -224,7 +186,12 @@ def _build_ai_naming(config_mgr, profile, handler):
             ),
         )
 
-    ui.label("提示词 (Prompt):").classes("text-xs text-slate-500 font-mono mb-1")
+    with ui.row().classes("gap-2 items-center w-full mb-1"):
+        ui.label("提示词 (Prompt):").classes("text-xs text-slate-500 font-mono")
+        _updated = cfg.get("ai_prompt_updated", "")
+        ui.label(
+            f"更新于 {_updated}" if _updated else "尚未生成"
+        ).classes("text-xs text-slate-600 font-mono")
     prompt_area = ui.textarea(value=cfg.get("ai_prompt", "")).classes(
         "w-full bg-slate-700 text-cyan-100 font-mono text-sm"
     ).style("min-height: 100px;").on_value_change(
@@ -235,28 +202,29 @@ def _build_ai_naming(config_mgr, profile, handler):
 
     result_state = {"result": {}}
 
-    def _btn(label, on_click, color):
-        return run_button(label, color, on_click)
-
     with ui.row().classes("gap-3 mt-4"):
-        _btn("生成需求", lambda: _gen_prompt(config_mgr, profile, handler, prompt_area), "cyan")
-        _btn("预览改动", lambda: _preview(config_mgr, profile, prompt_area, result_state, result_container), "cyan")
-        _btn("应用映射", lambda: _apply(config_mgr, profile, handler, result_state), "cyan")
+        run_button("生成需求", "cyan", lambda: _gen_prompt(config_mgr, profile, db, prompt_area))
+        run_button("预览改动", "cyan", lambda: _preview(config_mgr, profile, prompt_area, result_state, result_container))
+        run_button("应用映射", "cyan", lambda: _apply(config_mgr, profile, handler, result_state))
 
     _build_rollback_row(handler)
 
     result_container = ui.column().classes("w-full mt-4")
 
 
-def _build_ai_fix(config_mgr, profile, handler):
-    """AI 修正页面：检查已标准化文件的可查询补充槽位（中文名/英文名/年份/评分）。"""
+def _build_ai_fix(config_mgr, profile, handler, db):
+    """AI 修正页面：检查 root 中已检查文件的可查询补充槽位（中文名/英文名/年份/评分）。"""
     cfg = config_mgr.get_profile_config(profile)
 
     tag("naming-ai-fix")
     ui.label("AI 修正").classes("text-xs text-cyan-500 font-mono mb-2")
 
-
-    ui.label("提示词 (Prompt):").classes("text-xs text-slate-500 font-mono mb-1")
+    with ui.row().classes("gap-2 items-center w-full mb-1"):
+        ui.label("提示词 (Prompt):").classes("text-xs text-slate-500 font-mono")
+        _updated = cfg.get("ai_prompt_updated", "")
+        ui.label(
+            f"更新于 {_updated}" if _updated else "尚未生成"
+        ).classes("text-xs text-slate-600 font-mono")
     prompt_area = ui.textarea(value=cfg.get("ai_prompt", "")).classes(
         "w-full bg-slate-700 text-cyan-100 font-mono text-sm"
     ).style("min-height: 100px;").on_value_change(
@@ -266,29 +234,13 @@ def _build_ai_fix(config_mgr, profile, handler):
     result_state = {"result": {}, "selected": {}}
 
     with ui.row().classes("gap-3 mt-4"):
-        run_button("生成需求", "cyan", lambda: _gen_fix_prompt(config_mgr, profile, prompt_area))
+        run_button("生成需求", "cyan", lambda: _gen_fix_prompt(config_mgr, profile, db, prompt_area))
         run_button("预览改动", "cyan", lambda: _preview_fix(config_mgr, profile, prompt_area, result_state, result_container))
         run_button("应用映射", "cyan", lambda: _apply_fix(config_mgr, profile, handler, result_state))
 
-    _build_rollback_row(handler, source_key="ai_fix_path")
+    _build_rollback_row(handler, source_key="root")
 
     result_container = ui.column().classes("w-full mt-4")
-
-
-def _mask_key(key: str) -> str:
-    """脱敏显示 key：仅保留前 3 后 4 位，其余打码。"""
-    if not key:
-        return "未设置"
-    if len(key) <= 7:
-        return "*******"
-    return f"{key[:3]}****{key[-4:]}"
-
-
-def _save_tmdb_key(config_mgr, profile, value, key_input):
-    """录入 TMDB key：非空才覆盖保存，并刷新输入框为脱敏显示。"""
-    if value:
-        config_mgr.update_profile_config(profile, "tmdb_api_key", value)
-        key_input.set_value(_mask_key(value))
 
 
 def _save_rules(config_mgr, profile, value):
@@ -301,24 +253,16 @@ def _save_rules(config_mgr, profile, value):
 
 # ==================== AI 命名三步 ====================
 
-async def _gen_prompt(config_mgr, profile, handler, prompt_area):
-    """生成需求：扫描 from 目录，组装规则+文件名填入提示词框（可人工改）。"""
+async def _gen_prompt(config_mgr, profile, db, prompt_area):
+    """生成需求：取数据库中来源为 from 的文件，组装规则+文件名填入提示词框。"""
     clear_log()
     set_running("生成需求")
-    from_dir = Path(config_mgr.get_profile_config(profile).get("from", ""))
-    if not from_dir or not from_dir.exists():
-        log("  From 未设置或目录不存在", "red")
-        set_error()
-        return
-    try:
-        files = await asyncio.to_thread(handler.scan, root_override=from_dir)
-    except Exception as e:
-        logger.exception("scan 失败 from=%s", from_dir)
-        log(f"  scan 失败: {e}", "red")
-        set_error()
-        return
+    files = [
+        f for f in await asyncio.to_thread(media_files, db, profile, "from")
+        if f.exists()
+    ]
     if not files:
-        log("  From 中无视频文件", "yellow")
+        log("  数据库中无来源为 from 的文件（请先到「扫描」同步）", "yellow")
         set_ready()
         return
     limit = config_mgr.get_profile_config(profile).get("ai_batch_size", 20)
@@ -334,6 +278,9 @@ async def _gen_prompt(config_mgr, profile, handler, prompt_area):
     if not prompt_area.is_deleted:
         prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)
+    config_mgr.update_profile_config(
+        profile, "ai_prompt_updated", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
     msg = f"  已生成提示词：共 {len(names)} 个文件，取前 {len(batch)} 个"
     if infos:
         msg += f"，命中 {len(infos)} 条"
@@ -357,7 +304,7 @@ async def _preview(config_mgr, profile, prompt_area, result_state, result_contai
     set_running("预览改动")
     log("◆ 正在调用 Deepseek ...", "cyan")
     try:
-        result = await asyncio.to_thread(call_deepseek, key, prompt)
+        result, errors = await asyncio.to_thread(call_deepseek, key, prompt)
     except Exception as e:
         logger.exception("deepseek 调用失败")
         log(f"  调用失败: {e}", "red")
@@ -366,6 +313,10 @@ async def _preview(config_mgr, profile, prompt_area, result_state, result_contai
     result_state["result"] = result
     _save_mapping(result)
     _render_result_table(result_container, result)
+    if errors:
+        log(f"  跳过 {len(errors)} 条（必填槽位缺失）:", "yellow")
+        for e in errors:
+            log(f"    └ {e.get('file','?')}: {e.get('reason','?')}", "yellow")
     log(f"  返回 {len(result)} 条映射，已显示表格", "green")
     set_ready()
 
@@ -454,18 +405,16 @@ def _render_result_table(container, result):
 
 # ==================== AI 修正三步 ====================
 
-async def _gen_fix_prompt(config_mgr, profile, prompt_area):
-    """生成修正需求：扫描 path 顶层视频+压缩文件，取豆瓣信息，组装修正提示词。"""
+async def _gen_fix_prompt(config_mgr, profile, db, prompt_area):
+    """生成修正需求：取数据库中来源为 root 的文件，取豆瓣信息，组装修正提示词。"""
     clear_log()
     set_running("生成修正需求")
-    path = Path(config_mgr.get_profile_config(profile).get("ai_fix_path", ""))
-    if not path or not path.is_dir():
-        log("  Path 未设置或目录不存在", "red")
-        set_error()
-        return
-    files = await asyncio.to_thread(_scan_top_level, path)
+    files = [
+        f for f in await asyncio.to_thread(media_files, db, profile, "root")
+        if f.exists()
+    ]
     if not files:
-        log("  Path 下无视频/压缩文件", "yellow")
+        log("  数据库中无来源为 root 的文件（请先到「扫描」同步）", "yellow")
         set_ready()
         return
     names = [f.name for f in files]
@@ -477,6 +426,9 @@ async def _gen_fix_prompt(config_mgr, profile, prompt_area):
     if not prompt_area.is_deleted:
         prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)
+    config_mgr.update_profile_config(
+        profile, "ai_prompt_updated", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
     msg = f"  已生成修正提示词：共 {len(names)} 个文件"
     if infos:
         msg += f"，命中 {len(infos)} 条"
@@ -500,7 +452,7 @@ async def _preview_fix(config_mgr, profile, prompt_area, result_state, result_co
     set_running("预览改动")
     log("◆ 正在调用 Deepseek ...", "cyan")
     try:
-        result = await asyncio.to_thread(call_deepseek, key, prompt)
+        result, errors = await asyncio.to_thread(call_deepseek, key, prompt)
     except Exception as e:
         logger.exception("deepseek 调用失败")
         log(f"  调用失败: {e}", "red")
@@ -510,12 +462,16 @@ async def _preview_fix(config_mgr, profile, prompt_area, result_state, result_co
     result_state["selected"] = {k: True for k in result}
     _save_mapping(result)
     _render_fix_table(result_container, result, result_state["selected"])
+    if errors:
+        log(f"  跳过 {len(errors)} 条（必填槽位缺失）:", "yellow")
+        for e in errors:
+            log(f"    └ {e.get('file','?')}: {e.get('reason','?')}", "yellow")
     log(f"  返回 {len(result)} 条映射，已显示表格", "green")
     set_ready()
 
 
 async def _apply_fix(config_mgr, profile, handler, result_state):
-    """应用修正：仅重命名勾选的条目（原地改名）。"""
+    """应用修正：仅重命名勾选的条目（原地改名，root 目录内）。"""
     clear_log()
     set_running("应用修正")
     result = result_state.get("result", {})
@@ -524,9 +480,9 @@ async def _apply_fix(config_mgr, profile, handler, result_state):
         log("  尚无预览结果，请先点「预览改动」", "red")
         set_error()
         return
-    path = config_mgr.get_profile_config(profile).get("ai_fix_path", "")
+    path = config_mgr.get_profile_config(profile).get("root", "")
     if not path:
-        log("  Path 未设置", "red")
+        log("  Root 未设置", "red")
         set_error()
         return
     path_dir = Path(path)
@@ -582,56 +538,36 @@ def _render_fix_table(container, result, selected):
 
 # ==================== 文件名更新逻辑 ====================
 
-async def _run_rename(handler):
-    """执行文件名更新：扫描 from → normalize → rename（移动到 to）。"""
+async def _run_rename(handler, db):
+    """执行文件名更新：取数据库 from 文件 → normalize → rename（移动到 to）。"""
     clear_log()
     set_running("文件名更新")
     log("◆ 开始文件名更新...", "cyan")
 
     cfg = handler.config
-    from_path = cfg.get("from", "")
     to_path = cfg.get("to", "")
-    if not from_path:
-        log("  From 未设置", "red")
-        set_error()
-        return
     if not to_path:
         log("  To 未设置", "red")
         set_error()
         return
 
-    from_dir = Path(from_path)
     to_dir = Path(to_path)
 
-    if not from_dir.exists():
-        log(f"  From 目录不存在: {from_dir}", "red")
-        set_error()
-        return
-
-    if cancel_requested():
-        log("◆ 用户取消", "yellow")
-        set_ready()
-        return
-
-    try:
-        files = await asyncio.to_thread(handler.scan, root_override=from_dir)
-        log(f"  scan: 在 {from_dir} 中发现 {len(files)} 个视频文件", "gray")
-    except Exception as e:
-        logger.exception("scan 失败 from=%s", from_dir)
-        log(f"  scan 失败: {e}", "red")
-        set_error()
-        return
-
-    if cancel_requested():
-        log("◆ 用户取消", "yellow")
-        set_ready()
-        return
-
+    files = [
+        f for f in await asyncio.to_thread(media_files, db, handler.profile_name, "from")
+        if f.exists()
+    ]
     if not files:
-        log("  From 中无视频文件", "yellow")
+        log("  数据库中无来源为 from 的文件（请先到「扫描」同步）", "yellow")
         set_ready()
         return
 
+    if cancel_requested():
+        log("◆ 用户取消", "yellow")
+        set_ready()
+        return
+
+    log(f"  从数据库取到 {len(files)} 个 from 文件", "gray")
     for f in files[:10]:
         log(f"    └ {f.name}", "gray")
     if len(files) > 10:
@@ -690,7 +626,7 @@ async def _run_rename(handler):
 
 
 def _get_source_dir(handler, source_key="from"):
-    """获取回滚源目录：默认 from，AI 修正传 ai_fix_path。"""
+    """获取回滚目标目录：映射/AI 命名用 from，AI 修正用 root。"""
     p = (handler.config.get(source_key) or "").strip()
     return Path(p) if p else None
 

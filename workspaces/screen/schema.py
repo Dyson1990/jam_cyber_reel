@@ -1,22 +1,25 @@
-"""影视业务 — 默认 Profile 配置（movie / tv）。"""
+"""影视业务 — 通用配置（movie / tv 共享的 from/to/root 等跨功能参数）。
+
+功能页专属参数（如 ai_prompt、screenshot_config）分散在各自后端文件夹的 defaults.py，
+此处只保留跨功能共享的通用项，本文件作为 schema 单一来源。
+"""
+
+from workspaces.screen.normalize.defaults import DEFAULTS as _NORMALIZE
+from workspaces.screen.screenshot.defaults import DEFAULTS as _SCREENSHOT
+
+_COMMON = {
+    "root": "",
+    "from": "",
+    "to": "",
+    "extra_config": {},
+    **_NORMALIZE,
+    **_SCREENSHOT,
+}
 
 PROFILES = {
     "movie": {
+        **_COMMON,
         "name": "电影",
-        "root": "",
-        "from": "",
-        "to": "",
-        "naming_rules": {},
-        "extra_config": {},
-        "crid_pattern": "",
-        "naming_mode": "mapping",
-        "ai_prompt": "",
-        "ai_batch_size": 20,
-        "ai_douban": False,
-        "tmdb_api_key": "",
-        "ai_fix_path": "",
-        "kb_path": "",
-        "screenshot_config": {"count": 3, "moments": []},
         "table_schema": [
             {"name": "director", "type": "TEXT", "label": "导演"},
             {"name": "year", "type": "INTEGER", "label": "年份"},
@@ -27,21 +30,8 @@ PROFILES = {
         ],
     },
     "tv": {
+        **_COMMON,
         "name": "电视剧",
-        "root": "",
-        "from": "",
-        "to": "",
-        "naming_rules": {},
-        "extra_config": {},
-        "crid_pattern": "",
-        "naming_mode": "mapping",
-        "ai_prompt": "",
-        "ai_batch_size": 20,
-        "ai_douban": False,
-        "tmdb_api_key": "",
-        "ai_fix_path": "",
-        "kb_path": "",
-        "screenshot_config": {"count": 3, "moments": []},
         "table_schema": [
             {"name": "series", "type": "TEXT", "label": "系列"},
             {"name": "year", "type": "INTEGER", "label": "年份"},
@@ -58,11 +48,17 @@ PROFILES = {
 
 DEEPSEEK_KEY = "deepseek_key"
 
+# 已废弃的旧键：从运行时配置中清除，避免残留在 overrides.json 中。
+_LEGACY_KEYS = ("ai_api_key", "crid_pattern", "kb_path", "ai_fix_path", "ai_year")
+
 
 def migrate_shared(profiles: dict, shared: dict) -> None:
-    """迁移：旧的 per-profile ai_api_key → screen 共享 deepseek_key。"""
+    """迁移：旧 per-profile ai_api_key → screen 共享 deepseek_key，并清除废弃键。"""
     sh = shared.setdefault("screen", {})
     for p in PROFILES:
-        legacy = profiles.get(p, {}).pop("ai_api_key", "")
+        cfg = profiles.get(p, {})
+        legacy = cfg.pop("ai_api_key", "")
         if legacy and not sh.get(DEEPSEEK_KEY):
             sh[DEEPSEEK_KEY] = legacy
+        for k in _LEGACY_KEYS:
+            cfg.pop(k, None)

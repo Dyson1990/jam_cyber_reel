@@ -1,12 +1,11 @@
 """
 扫描模块（screen）— 数据库同步。
 
-对应原同步页的「数据库同步」卡片：扫描 Root（排除 from/to 若在 Root 下）
-→ 与 media 表对比 → 更新数据库。
+扫 from/to/root 三目录的顶层影视文件与压缩包（不递归子目录），
+与 media 表对比、更新；每条记录写入来源（from/to/root）。
 
 参数（输入即保存到 config_manager，跨模块共享）：
-    root         — 扫描目录
-    crid_pattern — crid 正则提取
+    from / to / root — 三个来源目录（通用，见 config.py）
 """
 
 import asyncio
@@ -16,7 +15,7 @@ from pathlib import Path
 from nicegui import ui
 
 from core.logging_config import get_logger
-from core.common.browser import get_relative_exclude_dirs
+from workspaces.screen.scan import diff_db, sync_db
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
     log, clear_log, set_running, set_ready, set_error,
@@ -25,22 +24,17 @@ from ui.workspaces.screen._shared import (
 
 logger = get_logger(__name__)
 
+_SOURCE_LABEL = {"from": "from", "to": "to", "root": "root"}
+
 
 def build_scan(config_mgr, db, registry):
     """构建扫描页 UI。"""
     profile = config_mgr.current_profile
-    handler = registry.get(profile)
     cfg = config_mgr.get_profile_config()
-    root = cfg.get("root", "") or "未设置"
-    crid_pattern = cfg.get("crid_pattern", "")
 
     tag("scan")
     ui.label("◆ 扫描").classes("text-xl font-mono text-cyan-400 mb-6 glow-text")
     build_profile_radio(config_mgr, "scan")
-
-    if not handler:
-        ui.label("⚠ 当前 Profile 未加载 handler").classes("text-red-400 font-mono")
-        return
 
     with ui.row().classes("w-full").style("position: relative;"):
         with ui.column().classes("flex-1 min-w-0").style("margin-right: calc(38% + 1rem);"):
@@ -50,56 +44,44 @@ def build_scan(config_mgr, db, registry):
                 tag("scan-db")
                 ui.label("◆ 数据库同步").classes("text-lg font-mono text-cyan-400 mb-2")
                 ui.label(
-                    "扫描 Root 中全部视频文件，与数据库记录对比，更新差异。"
+                    "扫描 From/To/Root 顶层影视文件与压缩包（不递归子目录），"
+                    "记录来源，与数据库对比更新。"
                 ).classes("text-sm text-slate-500 font-mono mb-4")
 
-                with ui.row().classes("gap-2 items-center w-full mb-3"):
-                    ui.label("Root:").classes("text-xs text-slate-500 font-mono w-20")
-                    root_input = ui.input(value=cfg.get("root", ""), placeholder="D:/Media/Movies").classes(
-                        "flex-1 font-mono text-xs"
-                    ).props("outlined dense dark")
-                    root_input.on_value_change(lambda e: _save_root(
-                        config_mgr, profile, e.value,
-                    ))
-
-                with ui.row().classes("gap-2 items-center w-full mb-4"):
-                    ui.label("crid 正则:").classes("text-xs text-slate-500 font-mono w-20")
-                    crid_input = ui.input(
-                        value=crid_pattern, placeholder="例如: CRID-(\\d+)",
-                    ).classes("flex-1 font-mono text-xs").props("outlined dense dark")
-                    crid_input.on_value_change(lambda e: (
-                        config_mgr.update_profile_config(profile, "crid_pattern", e.value or "")
-                    ))
+                _path_row(config_mgr, profile, "from", cfg.get("from", ""))
+                _path_row(config_mgr, profile, "to", cfg.get("to", ""))
+                _path_row(config_mgr, profile, "root", cfg.get("root", ""))
 
                 with ui.row().classes("gap-4"):
-                    run_button("▶ 对比差异", "cyan", lambda: _run_db_diff(handler))
-                    run_button("▶ 数据库同步", "cyan", lambda: _run_db_sync(handler))
+                    run_button("▶ 对比差异", "cyan", lambda: _run_db_diff(config_mgr, profile, db))
+                    run_button("▶ 数据库同步", "cyan", lambda: _run_db_sync(config_mgr, profile, db))
 
         build_log_panel()
 
 
-def _save_root(config_mgr, profile, value):
-    config_mgr.update_profile_config(profile, "root", value or "")
-    update_drawer_info()
+def _path_row(config_mgr, profile, key, value):
+    """一行路径输入：label 大写，输入即保存（root 额外刷新抽屉显示）。"""
+    label = {"from": "From", "to": "To", "root": "Root"}[key]
+    with ui.row().classes("gap-2 items-center w-full mb-3"):
+        ui.label(f"{label}:").classes("text-xs text-slate-500 font-mono w-20")
+        ui.input(value=value, placeholder="D:/Media/Movies").classes(
+            "flex-1 font-mono text-xs"
+        ).props("outlined dense dark").on_value_change(
+            lambda e, k=key: _save_path(config_mgr, profile, k, e.value),
+        )
 
 
-def _exclude_dirs(handler) -> list[str]:
-    """按当前配置计算 root 下需排除的相对目录（含 from/to）。"""
-    cfg = handler.config
-    return get_relative_exclude_dirs(
-        cfg.get("root", ""), cfg.get("from", ""), cfg.get("to", ""),
-    )
+def _save_path(config_mgr, profile, key, value):
+    config_mgr.update_profile_config(profile, key, value or "")
+    if key == "root":
+        update_drawer_info()
 
 
-async def _run_db_diff(handler):
-    """对比 Root 文件与数据库记录，展示增减清单。"""
+async def _run_db_diff(config_mgr, profile, db):
+    """对比 From/To/Root 顶层文件与数据库记录，展示增减清单（含来源）。"""
     clear_log()
     set_running("对比差异")
     log("◆ 开始对比数据库差异...", "cyan")
-
-    exclude_dirs = _exclude_dirs(handler)
-    if exclude_dirs:
-        log(f"  排除目录: {exclude_dirs}", "gray")
 
     if cancel_requested():
         log("◆ 用户取消", "yellow")
@@ -108,31 +90,25 @@ async def _run_db_diff(handler):
 
     try:
         diff = await asyncio.to_thread(
-            handler.diff_db,
-            exclude_dirs=exclude_dirs if exclude_dirs else None,
+            diff_db, config_mgr.get_profile_config(profile), db, profile,
         )
     except Exception as e:
-        logger.exception("对比数据库差异失败 profile=%s", handler.profile_name)
+        logger.exception("对比数据库差异失败 profile=%s", profile)
         log(f"  对比失败: {e}", "red")
         set_error()
-        return
-
-    if cancel_requested():
-        log("◆ 用户取消", "yellow")
-        set_ready()
         return
 
     added = diff["added"]
     removed = diff["removed"]
     existing = diff["existing"]
 
-    log(f"  + 新增 {len(added)} 个文件（Root 中有，DB 中无）", "green")
-    for f in added[:20]:
-        log(f"      {f.name}", "green")
+    log(f"  + 新增 {len(added)} 个文件（磁盘有，DB 无）", "green")
+    for f, source in added[:20]:
+        log(f"      {f.name}  [{_SOURCE_LABEL.get(source, source)}]", "green")
     if len(added) > 20:
         log(f"      ... 还有 {len(added) - 20} 个", "gray")
 
-    log(f"  - 移除 {len(removed)} 个文件（DB 中有，Root 中无）", "red")
+    log(f"  - 移除 {len(removed)} 个文件（DB 有，磁盘无）", "red")
     for p in removed[:20]:
         log(f"      {Path(p).name}", "red")
     if len(removed) > 20:
@@ -141,21 +117,16 @@ async def _run_db_diff(handler):
     log(f"  = 保持不变 {existing} 个文件", "gray")
 
     if not added and not removed:
-        log("  数据库与 Root 完全一致 ✓", "cyan")
+        log("  数据库与磁盘完全一致 ✓", "cyan")
     log("◆ 对比完成 ✓", "cyan")
     set_ready()
 
 
-async def _run_db_sync(handler):
-    """执行数据库同步：将 Root 中新增文件写入 media 表。"""
+async def _run_db_sync(config_mgr, profile, db):
+    """执行数据库同步：将 From/To/Root 新增文件写入 media 表（记录来源）。"""
     clear_log()
     set_running("数据库同步")
     log("◆ 开始数据库同步...", "cyan")
-
-    crid_pattern = handler.config.get("crid_pattern", "")
-    exclude_dirs = _exclude_dirs(handler)
-    if crid_pattern:
-        log(f"  crid 提取: {crid_pattern}", "gray")
 
     if cancel_requested():
         log("◆ 用户取消", "yellow")
@@ -164,8 +135,7 @@ async def _run_db_sync(handler):
 
     try:
         diff = await asyncio.to_thread(
-            handler.diff_db,
-            exclude_dirs=exclude_dirs if exclude_dirs else None,
+            diff_db, config_mgr.get_profile_config(profile), db, profile,
         )
         log(f"  发现 {len(diff['added'])} 个新增文件", "gray")
 
@@ -175,21 +145,19 @@ async def _run_db_sync(handler):
             return
 
         count = await asyncio.to_thread(
-            handler.sync_db,
-            exclude_dirs=exclude_dirs if exclude_dirs else None,
-            crid_pattern=crid_pattern,
-            added=diff["added"],
+            sync_db, config_mgr.get_profile_config(profile), db, profile,
+            diff["added"],
         )
         log(f"  已写入 {count} 条新记录", "green")
 
         if diff["removed"]:
             log(
-                f"  注意: {len(diff['removed'])} 个文件在 Root 中已不存在，"
-                f"数据库中对应记录已保留",
+                f"  注意: {len(diff['removed'])} 个文件在磁盘已不存在，"
+                f"数据库对应记录已保留",
                 "yellow",
             )
     except Exception as e:
-        logger.exception("数据库同步失败 profile=%s", handler.profile_name)
+        logger.exception("数据库同步失败 profile=%s", profile)
         log(f"  数据库同步失败: {e}", "red")
         set_error()
         return

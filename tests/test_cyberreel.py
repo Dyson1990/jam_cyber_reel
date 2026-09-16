@@ -3,7 +3,7 @@
 
 覆盖：
     core/common/browser.py  — get_exclude_dirs / filter_records / format_cell / format_size
-    core/sync.py            — _extract_crid / diff_db / build_db
+    workspaces/screen/scan/sync.py — scan_sources / diff_db / sync_db / media_files
     core/files.py           — scan_videos / rename_files / rollback_records
     core/screenshots.py     — format_time_label
     workspaces/_shared.py   — _apply_rules / parse_naming_rules / parse_table_schema / save_config
@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.common.browser import get_exclude_dirs, filter_records, format_cell, format_size
-from core.sync import _extract_crid, diff_db, build_db
+from workspaces.screen.scan.sync import scan_sources, diff_db, sync_db, media_files
 from core.files import scan_videos, rename_files, rollback_records, is_subpath
 from core.screenshots import format_time_label
 from core.db import Database
@@ -52,10 +52,10 @@ class FakeDB:
         self.history = [r for r in self.history if r["id"] != record_id]
 
     def get_media_by_profile(self, profile):
-        return [{"mv_path": p} for p in self.media.get(profile, [])]
+        return list(self.media.get(profile, []))
 
     def upsert_media(self, profile, title, mv_path, cover=None, **extra):
-        self.media.setdefault(profile, []).append(mv_path)
+        self.media.setdefault(profile, []).append({"mv_path": mv_path, **extra})
 
 
 class FakeConfigMgr:
@@ -126,50 +126,64 @@ class TestBrowserFilter(unittest.TestCase):
         self.assertTrue(is_subpath(r"C:\Media\new", r"C:\Media\new"))  # 等于自身
 
 
-# ==================== sync ====================
+# ==================== scan/sync ====================
 
-class TestSync(unittest.TestCase):
-    def test_extract_crid_group(self):
-        self.assertEqual(_extract_crid("CRID-12345", r"CRID-(\d+)"), "12345")
+class TestScanSync(unittest.TestCase):
+    def test_scan_sources_top_level_and_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            f = root / "from"; t = root / "to"; r = root / "root"
+            f.mkdir(); t.mkdir(); r.mkdir()
+            (f / "a.mp4").write_bytes(b"x")
+            (t / "b.mkv").write_bytes(b"x")
+            (r / "c.rar").write_bytes(b"x")
+            (f / "sub").mkdir(); (f / "sub" / "d.mp4").write_bytes(b"x")
+            cfg = {"from": str(f), "to": str(t), "root": str(r)}
+            got = {p.name: src for p, src in scan_sources(cfg)}
+            # 仅顶层；子目录 d.mp4 忽略；压缩包 c.rar 计入
+            self.assertEqual(got, {"a.mp4": "from", "b.mkv": "to", "c.rar": "root"})
 
-    def test_extract_crid_no_group(self):
-        self.assertEqual(_extract_crid("ABC", r"ABC"), "ABC")
-
-    def test_extract_crid_empty_or_invalid(self):
-        self.assertEqual(_extract_crid("abc", ""), "")
-        self.assertEqual(_extract_crid("abc", "("), "")  # 非法正则
-
-    def test_diff_db_added_removed(self):
+    def test_diff_db_added_removed_with_source(self):
         db = FakeDB()
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            (root / "new.mp4").write_bytes(b"x")
-            db.media["movie"] = [os.path.normpath(str(root / "gone.mp4"))]
-            diff = diff_db(str(root), db, "movie")
-            self.assertEqual([p.name for p in diff["added"]], ["new.mp4"])
+            f = root / "from"; f.mkdir()
+            (f / "new.mp4").write_bytes(b"x")
+            db.media["movie"] = [{"mv_path": os.path.normpath(str(f / "gone.mp4"))}]
+            diff = diff_db({"from": str(f), "to": "", "root": ""}, db, "movie")
+            self.assertEqual([(p.name, s) for p, s in diff["added"]], [("new.mp4", "from")])
             self.assertEqual([Path(p).name for p in diff["removed"]], ["gone.mp4"])
-
-    def test_build_db_only_top_level(self):
-        db = FakeDB()
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            (root / "a.mp4").write_bytes(b"x")
-            (root / "sub").mkdir()
-            (root / "sub" / "b.mp4").write_bytes(b"x")
-            (root / "note.txt").write_bytes(b"x")
-            n = build_db(str(root), db, "homework")
-            self.assertEqual(n, 1)  # 仅顶层视频，忽略子目录与 txt
 
     def test_diff_db_case_insensitive(self):
         db = FakeDB()
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            (root / "Old.mp4").write_bytes(b"x")
-            db.media["movie"] = [os.path.normpath(str(root / "old.mp4"))]  # 大小写不同
-            diff = diff_db(str(root), db, "movie")
+            f = root / "from"; f.mkdir()
+            (f / "Old.mp4").write_bytes(b"x")
+            db.media["movie"] = [{"mv_path": os.path.normpath(str(f / "old.mp4"))}]
+            diff = diff_db({"from": str(f), "to": "", "root": ""}, db, "movie")
             self.assertEqual(diff["added"], [])
             self.assertEqual(diff["removed"], [])
             self.assertEqual(diff["existing"], 1)
+
+    def test_sync_db_records_source(self):
+        db = FakeDB()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            f = root / "from"; f.mkdir()
+            (f / "a.mp4").write_bytes(b"x")
+            n = sync_db({"from": str(f), "to": "", "root": ""}, db, "movie")
+            self.assertEqual(n, 1)
+            self.assertEqual(db.media["movie"][0]["source"], "from")
+
+    def test_media_files_filter_by_source(self):
+        db = FakeDB()
+        db.media["movie"] = [
+            {"mv_path": "/m/a.mp4", "source": "from"},
+            {"mv_path": "/m/b.mp4", "source": "root"},
+        ]
+        self.assertEqual(media_files(db, "movie", "from"), [Path("/m/a.mp4")])
+        self.assertEqual(len(media_files(db, "movie")), 2)
 
 
 # ==================== files ====================

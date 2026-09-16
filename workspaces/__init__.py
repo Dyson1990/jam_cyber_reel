@@ -9,7 +9,7 @@ Workspaces — 专用选项后端。
 每个 workspace 定义默认 profile、可切换 profiles、以及专用菜单项。
 """
 
-from workspaces.screen.config import PROFILES as _SCREEN_PROFILES
+from workspaces.screen.schema import PROFILES as _SCREEN_PROFILES
 from workspaces.doc.config import PROFILES as _DOC_PROFILES
 from workspaces.lab.config import PROFILES as _LAB_PROFILES
 
@@ -21,7 +21,7 @@ WORKSPACES = {
         "label": "影视",
         "profiles": ["movie", "tv"],
         "default_profile": "movie",
-        "menu": ["kb", "scan", "normalize", "screenshot"],
+        "menu": ["scan", "kb", "normalize", "screenshot"],
     },
     "doc": {
         "label": "纪实",

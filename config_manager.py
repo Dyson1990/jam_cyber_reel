@@ -15,7 +15,7 @@
     ConfigManager: 配置管理核心类
 
 数据流向：
-    UI 配置页 → ConfigManager → workspaces/<ws>/config.json（各 workspace 运行时覆盖）
+    UI 配置页 → ConfigManager → workspaces/<ws>/overrides.json（各 workspace 运行时覆盖）
     Profile handler ← ConfigManager.get_profile_config()
     current_profile → core/state.json（全局唯一）
 """
@@ -42,7 +42,7 @@ class ConfigManager:
         """初始化配置管理器。
 
         Args:
-            base: 项目根目录（workspaces/<ws>/config.json、core/state.json 位于其下）
+            base: 项目根目录（workspaces/<ws>/overrides.json、core/state.json 位于其下）
         """
         self.base = base
         self._data: dict = self._load()
@@ -77,18 +77,22 @@ class ConfigManager:
         """调用各 workspace 声明的 migrate_shared(profiles, shared) 钩子。
 
         框架只按 WORKSPACES 键动态导入并调用钩子，不硬编码任何业务迁移逻辑。
+        schema 模块名：screen 用 schema.py，其余 workspace 仍为 config.py（兼容）。
         """
         for ws in WORKSPACES:
-            try:
-                mod = importlib.import_module(f"workspaces.{ws}.config")
-            except ModuleNotFoundError:
-                continue
-            migrate = getattr(mod, "migrate_shared", None)
+            mod = None
+            for name in ("schema", "config"):
+                try:
+                    mod = importlib.import_module(f"workspaces.{ws}.{name}")
+                    break
+                except ModuleNotFoundError:
+                    continue
+            migrate = getattr(mod, "migrate_shared", None) if mod else None
             if callable(migrate):
                 migrate(data["profiles"], data.setdefault("shared", {}))
 
     def _workspace_path(self, ws: str) -> Path:
-        return self.base / "workspaces" / ws / "config.json"
+        return self.base / "workspaces" / ws / "overrides.json"
 
     def _state_path(self) -> Path:
         return self.base / "core" / "state.json"

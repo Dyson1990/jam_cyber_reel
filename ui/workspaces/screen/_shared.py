@@ -142,6 +142,22 @@ def build_profile_radio(config_mgr, page: str):
         )
 
 
+def mask_key(key: str) -> str:
+    """脱敏显示 key：仅保留前 3 后 4 位，其余打码。"""
+    if not key:
+        return "未设置"
+    if len(key) <= 7:
+        return "*******"
+    return f"{key[:3]}****{key[-4:]}"
+
+
+def save_tmdb_key(config_mgr, profile, value, key_input):
+    """录入 TMDB key：非空才覆盖保存，并刷新输入框为脱敏显示。"""
+    if value:
+        config_mgr.update_profile_config(profile, "tmdb_api_key", value)
+        key_input.set_value(mask_key(value))
+
+
 def build_log_panel():
     """渲染右侧共享日志面板（absolute 定位，与左侧卡片严格等高）。"""
     global _log_container, _log_scroll_nicegui_id
