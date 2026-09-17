@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 
 DOUBAN_SUGGEST_URL = "https://www.douban.com/j/search_suggest"
+DOUBAN_SUBJECT_SUGGEST_URL = "https://movie.douban.com/j/subject_suggest"
 APIZERO_MOVIE_URL = "https://v1.apizero.cn/api/douban-movie"
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -137,3 +138,58 @@ def fetch_douban(query: str, year: str = "") -> dict | None:
     if suggest_raw is not None:
         info["raw"]["suggest"] = suggest_raw
     return info
+
+
+_CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+_SEASON_RE = re.compile(r"第\s*([0-9]+|[一二三四五六七八九十]+)\s*季")
+
+
+def _season_num(title: str) -> int | None:
+    """从「第X季」提取季号（阿拉伯/中文数字），无则 None；十一季以上罕见，不解析。"""
+    m = _SEASON_RE.search(title or "")
+    if not m:
+        return None
+    t = m.group(1)
+    return int(t) if t.isdigit() else _CN_NUM.get(t)
+
+
+def fetch_douban_tv(query: str, year: str = "") -> dict | None:
+    """剧名 → {zh,en,year,seasons,score,finished,raw}：纯豆瓣，不打其它源。
+
+    各季联想列表(subject_suggest)列出一部剧的各季（含集数/年份/英文副标题），由此推：
+    季数=最大季号；年份=各季年份去重「、」连接；某季集数 unknow/空→连载，否则完结。
+    评分取首季 apizero 详情；中英文名取「标题去季后缀 + 英文副标题」。
+    """
+    url = f"{DOUBAN_SUBJECT_SUGGEST_URL}?q={urllib.parse.quote(query)}"
+    try:
+        cards = _http_json(url)
+    except Exception as e:
+        raise RuntimeError(f"豆瓣剧集搜索失败 {query}: {e}") from e
+    if not isinstance(cards, list) or not cards:
+        return None
+    primary = cards[0]
+    sub = (primary.get("sub_title") or "").strip()
+    if sub:
+        # 同名真人版/剧场版等副标题不同，按首条副标题过滤到本剧各季
+        cards = [c for c in cards if (c.get("sub_title") or "").strip().casefold() == sub.casefold()]
+    nums = [n for n in (_season_num(c.get("title") or "") for c in cards) if n]
+    seasons = str(max(nums)) if nums else ""
+    years = sorted({str(c.get("year") or "")[:4] for c in cards if str(c.get("year") or "")[:4].isdigit()})
+    finished = "" if any((c.get("episode") or "") in ("", "unknow") for c in cards) else "完结"
+
+    apz = _apizero_info(str(primary.get("id") or "")) if primary.get("id") else {}
+    zh = _SEASON_RE.sub("", primary.get("title") or "").strip()
+    en = sub if any(ch.isascii() and ch.isalpha() for ch in sub) else ""
+    zh = zh or (apz or {}).get("zh", "")
+    en = en or (apz or {}).get("en", "")
+    if not (zh or en):
+        return None
+    raw = {"apizero": (apz or {}).get("raw", {}).get("apizero", {}), "suggest": cards}
+    return {
+        "zh": zh, "en": en,
+        "year": "、".join(years) or (apz or {}).get("year", ""),
+        "seasons": seasons,
+        "score": (apz or {}).get("score", ""),
+        "finished": finished,
+        "raw": raw,
+    }

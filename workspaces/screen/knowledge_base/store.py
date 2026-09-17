@@ -20,29 +20,37 @@ _KB_DIR = Path(__file__).resolve().parent / "storage"
 _EMB = [1.0] * 8
 
 _client = None
-_collection = None
+_collections: dict[str, object] = {}
 
 
-def _get_collection():
-    """惰性获取 chromadb collection（进程内复用）。"""
-    global _client, _collection
-    if _collection is None:
+def _collection_name(profile: str) -> str:
+    """movie 沿用旧集合名 screen_kb 以保留既有数据；其余 profile 各自独立集合。"""
+    return "screen_kb" if profile == "movie" else f"screen_kb_{profile}"
+
+
+def _get_collection(profile: str = "movie"):
+    """惰性获取 chromadb collection（按 profile 分集合，进程内复用）。"""
+    global _client
+    if _client is None:
         _client = chromadb.PersistentClient(path=str(_KB_DIR))
-        _collection = _client.get_or_create_collection(name="screen_kb")
-    return _collection
+    col = _collections.get(profile)
+    if col is None:
+        col = _client.get_or_create_collection(name=_collection_name(profile))
+        _collections[profile] = col
+    return col
 
 
 def _norm(s) -> str:
     return (s or "").strip()
 
 
-def kb_lookup(query: str) -> dict | None:
+def kb_lookup(query: str, profile: str = "movie") -> dict | None:
     """按片名查库：命中 title/中文名/英文名 任一即返回 {zh,en,year,score}。"""
     q = _norm(query)
     if not q:
         return None
     try:
-        res = _get_collection().get(
+        res = _get_collection(profile).get(
             where={"$or": [{"title": q}, {"zh": q}, {"en": q}]},
         )
     except Exception:
@@ -50,7 +58,7 @@ def kb_lookup(query: str) -> dict | None:
         return None
     if res and res["ids"]:
         m = res["metadatas"][0]
-        out = {k: m[k] for k in ("zh", "en", "year", "score") if m.get(k)}
+        out = {k: m[k] for k in ("zh", "en", "year", "score", "seasons", "finished") if m.get(k)}
         if m.get("raw"):
             try:
                 out["raw"] = json.loads(m["raw"])
@@ -60,10 +68,10 @@ def kb_lookup(query: str) -> dict | None:
     return None
 
 
-def kb_upsert(zh: str, en: str, year: str, score: str, title: str, raw: dict | None = None) -> None:
+def kb_upsert(zh: str, en: str, year: str, score: str, title: str, raw: dict | None = None, profile: str = "movie", seasons: str = "", finished: str = "") -> None:
     """写入一条映射；raw 为各源一手数据全量（无删减 JSON），以 中文名>英文名>title 派生稳定 id 幂等覆盖。"""
     meta = {}
-    for k, v in (("zh", zh), ("en", en), ("year", year), ("score", score), ("title", title)):
+    for k, v in (("zh", zh), ("en", en), ("year", year), ("score", score), ("title", title), ("seasons", seasons), ("finished", finished)):
         v = _norm(v)
         if v:
             meta[k] = v
@@ -77,17 +85,17 @@ def kb_upsert(zh: str, en: str, year: str, score: str, title: str, raw: dict | N
     key = meta.get("zh") or meta.get("en") or meta.get("title") or ""
     cid = hashlib.md5(key.encode("utf-8")).hexdigest()
     try:
-        _get_collection().upsert(
+        _get_collection(profile).upsert(
             ids=[cid], documents=[key], embeddings=[_EMB], metadatas=[meta],
         )
     except Exception:
         logger.warning("知识库写入失败 %s", key, exc_info=True)
 
 
-def kb_list() -> list[dict]:
+def kb_list(profile: str = "movie") -> list[dict]:
     """返回知识库全部条目 [{zh,en,year,score,title,raw}]，供表格展示。"""
     try:
-        res = _get_collection().get()
+        res = _get_collection(profile).get()
     except Exception:
         logger.warning("知识库列表读取失败", exc_info=True)
         return []
@@ -96,7 +104,7 @@ def kb_list() -> list[dict]:
         return out
     for i, mid in enumerate(res["ids"]):
         m = res["metadatas"][i]
-        row = {k: m.get(k, "") for k in ("zh", "en", "year", "score", "title")}
+        row = {k: m.get(k, "") for k in ("zh", "en", "year", "score", "seasons", "finished", "title")}
         if m.get("raw"):
             try:
                 row["raw"] = json.loads(m["raw"])

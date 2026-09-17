@@ -1,8 +1,9 @@
 """扫描（screen）— 数据库同步。
 
-扫 from/to/root 三目录的顶层影视文件与压缩包（不递归子目录），与 media 表对比；
-写入时记录每条文件的来源（from/to/root），供标准化/知识库按来源读取。
+扫 from/to/root 三目录的顶层单元，与 media 表对比；
+写入时记录每条记录的来源（from/to/root），供标准化/知识库按来源读取。
 
+单元随 profile 而异：movie=顶层影视文件与压缩包；tv=顶层子文件夹（电视剧以文件夹为单元）。
 约定（见 guide.md）：from=网上下载未经修改；to=已标准化；root=人工检查过。
 """
 
@@ -34,12 +35,26 @@ def _scan_top(path: str) -> list[Path]:
     )
 
 
-def scan_sources(cfg: dict) -> list[tuple[Path, str]]:
-    """按 from/to/root 顺序收集顶层文件，返回 [(path, source)]，跨目录去重。"""
+def _scan_top_dirs(path: str) -> list[Path]:
+    """扫单目录顶层子文件夹（电视剧以文件夹为单元），按名排序。"""
+    if not path:
+        return []
+    p = Path(path)
+    if not p.is_dir():
+        return []
+    return sorted(d for d in p.iterdir() if d.is_dir())
+
+
+def scan_sources(cfg: dict, profile: str = "movie") -> list[tuple[Path, str]]:
+    """按 from/to/root 顺序收集顶层单元，返回 [(path, source)]，跨目录去重。
+
+    movie=顶层影视文件/压缩包；tv=顶层子文件夹（一部剧一个文件夹）。
+    """
+    scan = _scan_top_dirs if profile == "tv" else _scan_top
     seen: set[str] = set()
     out: list[tuple[Path, str]] = []
     for key in _SOURCE_ORDER:
-        for f in _scan_top(cfg.get(key, "")):
+        for f in scan(cfg.get(key, "")):
             norm = os.path.normpath(str(f)).lower()
             if norm in seen:
                 continue
@@ -49,12 +64,13 @@ def scan_sources(cfg: dict) -> list[tuple[Path, str]]:
 
 
 def diff_db(cfg: dict, db, profile: str) -> dict:
-    """对比 from/to/root 顶层文件与 media 表，返回 {added, removed, existing}。
+    """对比 from/to/root 顶层单元与 media 表，返回 {added, removed, existing}。
 
     added 为 [(Path, source)]；两侧按 normpath+lower 比较，避免 Windows 大小写误判。
     """
     disk_map = {
-        os.path.normpath(str(f)).lower(): (f, src) for f, src in scan_sources(cfg)
+        os.path.normpath(str(f)).lower(): (f, src)
+        for f, src in scan_sources(cfg, profile)
     }
     db_map = {
         os.path.normpath(r["mv_path"]).lower(): r["mv_path"]
@@ -73,16 +89,20 @@ def diff_db(cfg: dict, db, profile: str) -> dict:
 
 
 def sync_db(cfg: dict, db, profile: str, added: list | None = None) -> int:
-    """将新增文件写入 media 表（记录 source），返回写入数。"""
+    """将新增单元写入 media 表（记录 source），返回写入数。
+
+    tv 单元是文件夹，无文件大小可记，故跳过 file_size。
+    """
     if added is None:
         added = diff_db(cfg, db, profile)["added"]
     count = 0
     for f, source in added:
         if not f.exists():
             continue
+        extra = {} if profile == "tv" else {"file_size": f.stat().st_size}
         db.upsert_media(
             profile=profile, title=f.stem, mv_path=str(f),
-            file_size=f.stat().st_size, source=source,
+            source=source, **extra,
         )
         count += 1
     logger.info("sync_db profile=%s 写入 %d 条", profile, count)

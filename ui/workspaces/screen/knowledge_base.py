@@ -25,10 +25,10 @@ from ui.workspaces.screen._shared import (
 logger = get_logger(__name__)
 
 
-def _table_rows(mode: str) -> list[dict]:
+def _table_rows(mode: str, profile: str) -> list[dict]:
     """取表格行。豆瓣=只看含豆瓣一手数据的条目并展示豆瓣字段；综合=全部条目最终值。"""
     rows = []
-    for e in kb_list():
+    for e in kb_list(profile):
         if mode == "douban":
             apz = ((e.get("raw") or {}).get("douban") or {}).get("apizero")
             if not isinstance(apz, dict):
@@ -44,6 +44,7 @@ def _table_rows(mode: str) -> list[dict]:
             rows.append({
                 "zh": e.get("zh", ""), "en": e.get("en", ""),
                 "year": e.get("year", ""), "score": e.get("score", ""),
+                "seasons": e.get("seasons", ""), "finished": e.get("finished", ""),
             })
     return rows
 
@@ -100,6 +101,9 @@ def build_kb(config_mgr, db, registry):
                         "w-24 font-mono text-xs").props("outlined dense dark")
                     score_input = ui.input(placeholder="豆瓣评分(可空)").classes(
                         "w-32 font-mono text-xs").props("outlined dense dark")
+                    finished_switch = ui.switch("完结").props("color=cyan").classes("ml-2")
+                    if profile != "tv":
+                        finished_switch.set_visibility(False)
                     ui.button("✔ 保存", on_click=lambda: _manual_save()).classes(
                         "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono text-sm "
                         "border border-cyan-600 rounded px-4 py-1"
@@ -117,19 +121,21 @@ def build_kb(config_mgr, db, registry):
             return
         table_container.clear()
         with table_container:
-            rows = _table_rows(mode_radio.value)
+            rows = _table_rows(mode_radio.value, profile)
             if not rows:
                 ui.label("(知识库为空)").classes("text-xs text-slate-500 font-mono")
                 return
-            ui.table(
-                columns=[
-                    {"name": "zh", "label": "中文名", "field": "zh", "align": "left"},
-                    {"name": "en", "label": "英文名", "field": "en", "align": "left"},
-                    {"name": "year", "label": "年份", "field": "year", "align": "left"},
-                    {"name": "score", "label": "豆瓣评分", "field": "score", "align": "left"},
-                ],
-                rows=rows,
-            ).classes("w-full")
+            cols = [
+                {"name": "zh", "label": "中文名", "field": "zh", "align": "left"},
+                {"name": "en", "label": "英文名", "field": "en", "align": "left"},
+                {"name": "year", "label": "年份", "field": "year", "align": "left",
+                 "style": "white-space: normal; word-break: break-all;"},
+                {"name": "score", "label": "豆瓣评分", "field": "score", "align": "left"},
+            ]
+            if profile == "tv":
+                cols.append({"name": "seasons", "label": "季数", "field": "seasons", "align": "left"})
+                cols.append({"name": "finished", "label": "完结", "field": "finished", "align": "left"})
+            ui.table(columns=cols, rows=rows).classes("w-full")
 
     def _manual_save():
         """人工补充数据源缺失：直接写入知识库（title 留空，id 由中文名>英文名派生）。"""
@@ -140,8 +146,10 @@ def build_kb(config_mgr, db, registry):
         if not zh and not en:
             ui.notify("中文名 / 英文名至少填一个", type="warning")
             return
-        kb_upsert(zh, en, year, score, "")
+        kb_upsert(zh, en, year, score, "", profile=profile,
+                  finished="完结" if finished_switch.value else "")
         zh_input.value = en_input.value = year_input.value = score_input.value = ""
+        finished_switch.value = False
         _render_table()
         ui.notify("已写入知识库", type="positive")
 
@@ -171,11 +179,10 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
         set_ready()
         return
     # 已固化的（media 表有 zh/en）直接复用，未固化的才走 AI 提取，避免每次重复提取
-    files = [
-        {"name": Path(r["mv_path"]).name, "path": r["mv_path"],
-         "zh": r["zh"] or "", "en": r["en"] or ""}
-        for r in rows
-    ]
+    files = []
+    for r in rows:
+        files.append({"name": Path(r["mv_path"]).name, "path": r["mv_path"],
+                      "zh": r["zh"] or "", "en": r["en"] or ""})
     pending = [f for f in files if not f["zh"] and not f["en"]]
     log(
         f"  从数据库取到 {len(files)} 个文件（{len(pending)} 个待 AI 提取片名）",
@@ -199,7 +206,7 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
         for i in range(0, len(names), batch):
             chunk = names[i:i + batch]
             try:
-                part = await asyncio.to_thread(extract_names, key, chunk)
+                part = await asyncio.to_thread(extract_names, key, chunk, profile == "tv")
             except Exception as e:
                 logger.exception("AI 提取失败")
                 log(f"  AI 提取失败: {e}", "red")
@@ -216,7 +223,8 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
                 db.set_media_names(profile, f["path"], zh, en)
 
     added = skipped = 0
-    seen_q: set[str] = set()  # 本批已固化的片名，用于区分「同批重复」与「库中已有」
+    seen_movie: set[str] = set()  # movie 同批去重（按片名）
+    seen_tv: set[str] = set()     # tv 同批去重（数据源返回统一中英名，同名=同剧）
     for f in files:
         name = f["name"]
         zh = (f["zh"] or "").strip()
@@ -226,26 +234,28 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
             log(f"  └ 跳过（未提取到片名）: {name}", "gray")
             skipped += 1
             continue
-        # 同批去重：本批内另一文件已解析到同一片名 → 警告；库中已有（非本批新增）则静默跳过
-        if q in seen_q:
+
+        # 同批去重；movie 命中缓存即可跳过，tv 逐季更新须每次重查数据源（fetch_info 内不查缓存）
+        seen = seen_tv if profile == "tv" else seen_movie
+        if q in seen:
             skipped += 1
             log(f"  ⚠ 同批重复片名跳过: {q}", "yellow")
             continue
-        if kb_lookup(q):
+        if profile != "tv" and kb_lookup(q, profile=profile):
             skipped += 1
             continue
         try:
-            info = await asyncio.to_thread(fetch_info, q, tmdb_key, mode, extract_year(name))
+            info = await asyncio.to_thread(fetch_info, q, tmdb_key, mode, extract_year(name), profile)
         except Exception as e:
             logger.warning("取信息失败 %s: %s", q, e)
             info = None
         if info:
             added += 1
-            seen_q.add(q)
-            log(
-                f"  + {q} → {info.get('zh','')}/{info.get('en','')}/{info.get('year','')}",
-                "green",
-            )
+            seen.add(q)
+            extra = ""
+            if profile == "tv":
+                extra = f"/季{info.get('seasons') or '-'}/{info.get('score') or '-'}/{info.get('finished') or '连载'}"
+            log(f"  + {q} → {info.get('zh','')}/{info.get('en','')}/{info.get('year','')}{extra}", "green")
         else:
             skipped += 1
             log(f"  └ 未命中数据源: {q}", "gray")

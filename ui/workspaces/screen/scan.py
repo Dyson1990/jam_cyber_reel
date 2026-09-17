@@ -43,9 +43,12 @@ def build_scan(config_mgr, db, registry):
             ):
                 tag("scan-db")
                 ui.label("◆ 数据库同步").classes("text-lg font-mono text-cyan-400 mb-2")
+                unit = (
+                    "顶层子文件夹（电视剧以文件夹为单元）" if profile == "tv"
+                    else "顶层影视文件与压缩包（不递归子目录）"
+                )
                 ui.label(
-                    "扫描 From/To/Root 顶层影视文件与压缩包（不递归子目录），"
-                    "记录来源，与数据库对比更新。"
+                    f"扫描 From/To/Root {unit}，记录来源，与数据库对比更新。"
                 ).classes("text-sm text-slate-500 font-mono mb-4")
 
                 _path_row(config_mgr, profile, "from", cfg.get("from", ""))

@@ -273,8 +273,9 @@ async def _gen_prompt(config_mgr, profile, db, prompt_area):
         infos = await asyncio.to_thread(
             fetch_infos, batch,
             config_mgr.get_profile_config(profile).get("tmdb_api_key", ""),
+            profile,
         )
-    prompt = build_prompt(names, limit=limit, infos=infos)
+    prompt = build_prompt(names, limit=limit, infos=infos, is_tv=profile == "tv")
     if not prompt_area.is_deleted:
         prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)
@@ -421,8 +422,9 @@ async def _gen_fix_prompt(config_mgr, profile, db, prompt_area):
     infos = await asyncio.to_thread(
         fetch_infos, names,
         config_mgr.get_profile_config(profile).get("tmdb_api_key", ""),
+        profile,
     )
-    prompt = build_fix_prompt(names, infos=infos)
+    prompt = build_fix_prompt(names, infos=infos, is_tv=profile == "tv")
     if not prompt_area.is_deleted:
         prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)

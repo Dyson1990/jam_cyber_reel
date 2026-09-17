@@ -14,7 +14,12 @@ logger = logging.getLogger(__name__)
 
 TMDB_SEARCH_URL = "https://api.themoviedb.org/3/search/movie"
 TMDB_MOVIE_URL = "https://api.themoviedb.org/3/movie/{mid}"
+TMDB_TV_SEARCH_URL = "https://api.themoviedb.org/3/search/tv"
+TMDB_TV_URL = "https://api.themoviedb.org/3/tv/{tid}"
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36"
+
+# status=Ended/Canceled 表示不再更新（完结）；Returning/In Production 等仍在连载
+_FINISHED_STATUS = frozenset({"Ended", "Canceled"})
 
 
 def _http_json(url: str, timeout: float = 8.0):
@@ -83,4 +88,62 @@ def fetch_tmdb(query: str, api_key: str) -> dict | None:
             en = (det.get("title") or "").strip()
             if en and not _is_cjk(en):
                 info["en"] = en
+    return info or None
+
+
+def fetch_tmdb_tv(query: str, api_key: str) -> dict | None:
+    """剧名 → {zh, en, year, seasons, finished, raw}：search/tv + tv/{id}。
+
+    zh/en 取剧名/original_name；年份取各季 air_date 去重「、」连接（电视剧逐季年份不同）；
+    季数取 number_of_seasons；是否完结取 status（Ended/Canceled→完结，连载→空）。
+    """
+    if not api_key:
+        return None
+    url = f"{TMDB_TV_SEARCH_URL}?" + urllib.parse.urlencode({
+        "api_key": api_key, "query": query, "language": "zh-CN",
+    })
+    try:
+        data = _http_json(url)
+    except Exception as e:
+        raise RuntimeError(f"TMDB 剧集查询失败 {query}: {e}") from e
+    results = data.get("results", []) if isinstance(data, dict) else []
+    if not results:
+        return None
+    r = results[0]
+    info: dict = {"raw": {"search": data}}
+    det = None
+    if r.get("id"):
+        durl = f"{TMDB_TV_URL.format(tid=r['id'])}?" + urllib.parse.urlencode({
+            "api_key": api_key, "language": "zh-CN",
+        })
+        try:
+            det = _http_json(durl)
+        except Exception:
+            det = None
+        if isinstance(det, dict):
+            info["raw"]["tv"] = det
+    src = det if isinstance(det, dict) else r
+    if src.get("name"):
+        info["zh"] = src["name"]
+    ot = src.get("original_name") or ""
+    if ot and not _is_cjk(ot):
+        info["en"] = ot
+    years: list[str] = []
+    if isinstance(det, dict):
+        for s in det.get("seasons", []) or []:
+            if not isinstance(s, dict) or not s.get("season_number"):
+                continue  # 跳过 season 0（特辑/花絮）
+            ad = str(s.get("air_date") or "")[:4]
+            if ad.isdigit() and ad not in years:
+                years.append(ad)
+        if det.get("number_of_seasons"):
+            info["seasons"] = str(det["number_of_seasons"])
+        if det.get("status") in _FINISHED_STATUS:
+            info["finished"] = "完结"
+    if not years:
+        fa = str(src.get("first_air_date") or "")[:4]
+        if fa.isdigit():
+            years.append(fa)
+    if years:
+        info["year"] = "、".join(years)
     return info or None

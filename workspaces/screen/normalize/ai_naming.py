@@ -25,19 +25,10 @@ logger = logging.getLogger(__name__)
 # 规则知识库：每条自包含，便于单独检索与灵活增删（总结自旧版AI总结.md）
 # 规则知识库：一条「标准格式」模板固定槽位顺序，其余规则只描述各槽位的
 # 来源（原文件名/查询补充）与可空性，避免「紧接某某之后」这类依赖他字段是否存在的描述。
-RULES: list[dict[str, str]] = [
-    {
-        "topic": "总原则",
-        "content": "只使用原文件名已有字段或「## 查询结果」给出的字段，绝不臆造年份、评分、片名等任何信息。"
-        "「中文名/英文名/年份/字幕」四槽位必填：文件名与查询结果都取不到时，该文件不写入映射，"
-        "改为在 _errors 中报告错误；其余槽位缺值则直接跳过。",
-    },
-    {
-        "topic": "标准格式",
-        "content": "输出文件名按固定槽位模板排列："
-        "[中文名].[英文名].[年份].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]。"
-        "中文名/英文名/年份/字幕必填，版本信息/豆瓣评分/视频参数缺值跳过。",
-    },
+
+# 槽位规则（中文名/英文名/年份/版本信息/豆瓣评分/视频参数/字幕/清理）电影与电视剧共享；
+# 仅「总原则/标准格式/示例」因电影=单文件、电视剧=文件夹三级结构而分开，提示词因此也分开。
+_SLOT_RULES: list[dict[str, str]] = [
     {
         "topic": "中文名",
         "content": "来源=原文件名或查询补充，必填。原文件名有中文名则提取；没有时取「## 查询结果」给出的中文名；"
@@ -86,6 +77,24 @@ RULES: list[dict[str, str]] = [
         "topic": "清理",
         "content": "删除广告、网址、发布组等无关信息（如 梦幻天堂·龙网(www.321n.net)、[66影视www.66Ys.Co]、-BATWEB）。",
     },
+]
+
+# ==================== 电影规则 ====================
+
+RULES: list[dict[str, str]] = [
+    {
+        "topic": "总原则",
+        "content": "只使用原文件名已有字段或「## 查询结果」给出的字段，绝不臆造年份、评分、片名等任何信息。"
+        "「中文名/英文名/年份/字幕」四槽位必填：文件名与查询结果都取不到时，该文件不写入映射，"
+        "改为在 _errors 中报告错误；其余槽位缺值则直接跳过。",
+    },
+    {
+        "topic": "标准格式",
+        "content": "输出文件名按固定槽位模板排列："
+        "[中文名].[英文名].[年份].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]。"
+        "中文名/英文名/年份/字幕必填，版本信息/豆瓣评分/视频参数缺值跳过。",
+    },
+    *_SLOT_RULES,
     {
         "topic": "示例",
         "content": "爱乐之城.2017.BD1080p.国英双语.中英双字.mp4（查询给英文名 La La Land）→ "
@@ -97,6 +106,34 @@ RULES: list[dict[str, str]] = [
         "利刃出鞘2.1080p.BD中英双字[66影视www.66Ys.Co].mp4（查询给英文名 Glass Onion、年份2022、评分「豆6.6」）→ "
         "利刃出鞘2.Glass_Onion.2022.「豆6.6」.1080p.BD.中英字幕.mp4；"
         "xxx.1080p.mkv（文件名与查询都给不出中文名/英文名/年份）→ 不写入映射，报错：缺中文名/英文名/年份。",
+    },
+]
+
+# ==================== 电视剧规则 ====================
+
+TV_RULES: list[dict[str, str]] = [
+    {
+        "topic": "总原则",
+        "content": "只使用原文件夹名已有字段或「## 查询结果」给出的字段，绝不臆造年份、评分、片名等任何信息。"
+        "电视剧以文件夹为单元：标准化的对象是「系列文件夹名」（from/to/root 顶层的一部剧一个文件夹）。"
+        "「中文名/英文名」两槽位必填：文件夹名与查询结果都取不到时，该文件夹不写入映射，"
+        "改为在 _errors 中报告错误。",
+    },
+    {
+        "topic": "标准格式",
+        "content": "电视剧目录三级结构："
+        "系列文件夹=[中文名].[英文名]；"
+        "季子文件夹=[中文名].[英文名].[第X季].[年份]；"
+        "集文件=[中文名].[英文名].[第X季第Y集].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]（与电影模板一致）。"
+        "本步骤只输出「系列文件夹名 → 新系列文件夹名」映射，中文名/英文名必填。",
+    },
+    *_SLOT_RULES,
+    {
+        "topic": "示例",
+        "content": "权力的游戏.Game.of.Thrones（查询给英文名 Game of Thrones）→ 权力的游戏.Game_of_Thrones；"
+        "老友记.Friends → 老友记.Friends；"
+        "越狱.Prison.Break.2005 → 越狱.Prison_Break；"
+        "xxx（文件夹名与查询都给不出中文名/英文名）→ 不写入映射，报错：缺中文名/英文名。",
     },
 ]
 
@@ -129,27 +166,27 @@ class HashEmbedding(Embeddings):
         return [x / norm for x in vec]
 
 
-_store: InMemoryVectorStore | None = None
+_RULE_SETS = {"movie": RULES, "tv": TV_RULES}
+_stores: dict[str, InMemoryVectorStore] = {}
 
 
-def _get_store() -> InMemoryVectorStore:
-    """惰性构建规则向量库（首次调用时对各分块嵌入）。"""
-    global _store
-    if _store is None:
+def _get_store(kind: str) -> InMemoryVectorStore:
+    """惰性构建规则向量库（movie/tv 各一份，首次调用时对各分块嵌入）。"""
+    if kind not in _stores:
         docs = [
             Document(
                 page_content=f"{r['topic']}：{r['content']}",
                 metadata={"topic": r["topic"], "idx": i},
             )
-            for i, r in enumerate(RULES)
+            for i, r in enumerate(_RULE_SETS[kind])
         ]
-        _store = InMemoryVectorStore.from_documents(docs, HashEmbedding())
-    return _store
+        _stores[kind] = InMemoryVectorStore.from_documents(docs, HashEmbedding())
+    return _stores[kind]
 
 
-def _retrieve(query: str, k: int = 20) -> list[Document]:
+def _retrieve(query: str, k: int = 20, kind: str = "movie") -> list[Document]:
     """按相似度召回相关规则块，并按原文顺序还原。"""
-    hits = _get_store().similarity_search(query, k=k)
+    hits = _get_store(kind).similarity_search(query, k=k)
     hits.sort(key=lambda d: d.metadata.get("idx", 0))
     return hits
 
@@ -177,30 +214,42 @@ def _info_section(names: list[str], infos: dict[str, dict] | None) -> str:
 
 def build_prompt(
     filenames: list[str], limit: int | None = None, infos: dict[str, dict] | None = None,
+    is_tv: bool = False,
 ) -> str:
-    """检索相关规则 + 待标准化文件名（截断到 limit）+ 可选豆瓣信息（评分/年份）→ 组装提示词。"""
+    """检索相关规则 + 待标准化文件名（截断到 limit）+ 可选豆瓣信息（评分/年份）→ 组装提示词。
+
+    is_tv=True 用电视剧规则（文件夹三级结构），提示词与电影分开。
+    """
+    kind = "tv" if is_tv else "movie"
     names = filenames[:limit] if limit else filenames
-    context = "\n".join(f"- {d.page_content}" for d in _retrieve("\n".join(names)))
+    context = "\n".join(f"- {d.page_content}" for d in _retrieve("\n".join(names), kind=kind))
     lines = "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
+    unit = "文件夹" if is_tv else "文件名"
+    role = "电视剧" if is_tv else "电影"
     return (
-        "你是电影文件名标准化助手，请严格依据下列规则处理。\n\n"
+        f"你是{role}{unit}标准化助手，请严格依据下列规则处理。\n\n"
         f"## 规则\n{context}\n\n"
-        f"## 待标准化文件名\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
+        f"## 待标准化{unit}\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
     )
 
 
-def build_fix_prompt(filenames: list[str], infos: dict[str, dict] | None = None) -> str:
+def build_fix_prompt(
+    filenames: list[str], infos: dict[str, dict] | None = None, is_tv: bool = False,
+) -> str:
     """AI 修正提示词：仅检查/修正可查询补充槽位（中文名/英文名/年份/豆瓣评分），其余槽位不动。"""
+    kind = "tv" if is_tv else "movie"
     names = list(filenames)
-    context = "\n".join(f"- {d.page_content}" for d in _retrieve("\n".join(names)))
+    context = "\n".join(f"- {d.page_content}" for d in _retrieve("\n".join(names), kind=kind))
     lines = "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
+    unit = "文件夹" if is_tv else "文件名"
+    role = "电视剧" if is_tv else "电影"
     return (
-        "你是电影文件名修正助手。以下文件名已完成标准化，请仅检查并修正"
+        f"你是{role}{unit}修正助手。以下{unit}已完成标准化，请仅检查并修正"
         "「中文名 / 英文名 / 年份 / 豆瓣评分」四个可查询补充槽位：依据「## 查询结果」改正错误、"
-        "补上漏查（查询结果有而文件名缺的字段）；其余槽位（版本信息、视频参数、字幕信息等）一字不改；"
-        "无需修正的文件保持原名。\n\n"
+        f"补上漏查（查询结果有而{unit}缺的字段）；其余槽位（版本信息、视频参数、字幕信息等）一字不改；"
+        f"无需修正的{unit}保持原名。\n\n"
         f"## 槽位规范\n{context}\n\n"
-        f"## 待检查文件名\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
+        f"## 待检查{unit}\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
     )
 
 
@@ -242,17 +291,27 @@ _EXTRACT_INSTRUCTION = (
     "不要输出任何其他文字或解释。"
 )
 
+_TV_EXTRACT_INSTRUCTION = (
+    "你是电视剧文件夹名解析助手。对每个文件夹名，提取其中的「中文名」和「英文名」："
+    "中文名取文件夹名里的中文字段；英文名取文件夹名里的英文片名（去掉年份、季、分辨率、"
+    "编码、音轨、字幕、发布组等噪音词）；两者都没有则该字段为空字符串。\n"
+    "仅输出一个 JSON 字典：key 为原文件夹名，value 为 {\"zh\": 中文名, \"en\": 英文名}，"
+    "不要输出任何其他文字或解释。"
+)
 
-def extract_names(api_key: str, filenames: list[str]) -> dict[str, dict]:
-    """AI 从文件名提取中/英文名 → {文件名: {zh, en}}（供知识库扩充，非重命名）。"""
+
+def extract_names(api_key: str, filenames: list[str], is_tv: bool = False) -> dict[str, dict]:
+    """AI 从文件名/文件夹名提取 {zh, en}（作数据源查询词），供知识库扩充，非重命名。"""
+    instr = _TV_EXTRACT_INSTRUCTION if is_tv else _EXTRACT_INSTRUCTION
+    unit = "文件夹名" if is_tv else "文件名"
     lines = "\n".join(f"{i}. {n}" for i, n in enumerate(filenames, 1))
     llm = ChatDeepSeek(model=DEEPSEEK_MODEL, api_key=api_key, temperature=0)
-    content = llm.invoke(_EXTRACT_INSTRUCTION + f"\n\n## 待解析文件名\n{lines}").content
+    content = llm.invoke(instr + f"\n\n## 待解析{unit}\n{lines}").content
     return _parse_extract(content)
 
 
 def _parse_extract(content: str) -> dict[str, dict]:
-    """解析 extract_names 返回的 {文件名: {zh,en}}，容忍代码块包裹。"""
+    """解析 extract_names 返回的 {文件名: {zh,en,finished}}，容忍代码块包裹。"""
     text = (content or "").strip()
     if text.startswith("```"):
         text = text.strip("`")
@@ -270,5 +329,6 @@ def _parse_extract(content: str) -> dict[str, dict]:
             out[str(k)] = {
                 "zh": str(v.get("zh") or "").strip(),
                 "en": str(v.get("en") or "").strip(),
+                "finished": str(v.get("finished") or "").strip(),
             }
     return out
