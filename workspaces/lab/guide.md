@@ -11,12 +11,24 @@
 - `__init__.py` — 业务标识
 - `config.py` — 配置后端入口，复用 `workspaces/_shared.py` 的 `save_config`
 - `profile.py` — homework 的 Profile 插件（HomeworkHandler）
+- `dts/` — DTS 专利音轨检测（PyAV 遍历音频流，按编码名 dca/dts 判定）
+- `subtitle/` — 字幕提取（PyAV 解码文本字幕流转 SRT）
 
 ## 前端文件（ui/workspaces/lab/）
 - `config_page.py` — 配置页，复用 `ui/workspaces/_shared.py` 的 `build_config`
+- `dts.py` — DTS 检测页
+- `subtitle.py` — 字幕提取页
 
 ## 专用菜单
-配置（config）
+配置 → DTS 检测 → 字幕提取
+
+## 功能研究约定
+lab 下一种功能的研究，其代码全部放在一个文件夹内（后端 `workspaces/lab/<功能>/`，
+前端 `ui/workspaces/lab/<功能>.py`），对应网站菜单栏「概览」按钮下方的一个新按钮：
+1. 后端新建 `workspaces/lab/<功能>/__init__.py` 导出纯函数（不依赖 UI / DB）
+2. 前端新建 `ui/workspaces/lab/<功能>.py` 定义 `build_<功能>(config_mgr, db, registry)`
+3. 在 `ui/workspaces/lab/__init__.py` 的 `PAGES` 登记 page key → (图标, 标签, "模块:构建函数")
+4. 在 `workspaces/__init__.py` 的 `WORKSPACES["lab"]["menu"]` 追加该 page key
 
 ## Profile 插件（HomeworkHandler）
 `workspaces/lab/profile.py` 的 `HomeworkHandler` 继承 `ProfileBase` 并重写了：

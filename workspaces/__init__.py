@@ -33,7 +33,7 @@ WORKSPACES = {
         "label": "练习",
         "profiles": ["homework"],
         "default_profile": "homework",
-        "menu": ["config"],
+        "menu": ["config", "dts", "subtitle"],
     },
 }
 
