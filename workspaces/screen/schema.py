@@ -6,6 +6,7 @@
 
 from workspaces.screen.normalize.defaults import DEFAULTS as _NORMALIZE
 from workspaces.screen.screenshot.defaults import DEFAULTS as _SCREENSHOT
+from workspaces.screen.subtitle.defaults import DEFAULTS as _SUBTITLE
 
 _COMMON = {
     "root": "",
@@ -14,6 +15,7 @@ _COMMON = {
     "extra_config": {},
     **_NORMALIZE,
     **_SCREENSHOT,
+    **_SUBTITLE,
 }
 
 PROFILES = {

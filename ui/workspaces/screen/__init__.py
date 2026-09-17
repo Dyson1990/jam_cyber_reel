@@ -7,6 +7,7 @@ PAGES = {
     "normalize": ("✎", "标准化", "ui.workspaces.screen.normalize:build_normalize"),
     "screenshot": ("▣", "截图", "ui.workspaces.screen.screenshot:build_screenshot"),
     "kb": ("▥", "知识库", "ui.workspaces.screen.knowledge_base:build_kb"),
+    "sub_download": ("◉", "字幕", "ui.workspaces.screen.subtitle:build_subtitle"),
 }
 
 

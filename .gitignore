@@ -17,6 +17,9 @@ Thumbs.db
 # Temp
 .claude/
 
+# 字幕下载产物（射手下载的 .ass/.srt）
+workspaces/screen/subtitle/subs/
+
 # 运行时配置 / 状态（含密钥）
 workspaces/*/overrides.json
 workspaces/*/knowledge_base/storage/
