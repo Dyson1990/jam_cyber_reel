@@ -1,7 +1,7 @@
-"""Wikidata 数据源 — 中文名/英文名/年份（免 Key，Wikimedia 基础设施，稳定）。
+"""Wikidata 数据源 — 中文名/英文名/年份/季数（免 Key，Wikimedia 基础设施，稳定）。
 
-wbsearchentities 按中文名定位条目（过滤 description 含 film/movie），wbgetentities 取中英文
-标签与 P577 出版日期年份。
+wbsearchentities 按中文名定位条目（过滤 description 含 film/movie/television），wbgetentities
+取中英文标签、P577 出版日期年份、P2437 季数（电视剧）。
 """
 
 import json
@@ -36,7 +36,7 @@ def _find_qid(query: str) -> tuple[str | None, dict | None]:
 
 
 def fetch_wikidata(query: str) -> dict | None:
-    """片名 → {zh, en, year, raw}；raw 存实体 + 搜索原始 JSON 无删减。"""
+    """片名 → {zh, en, year, seasons, raw}；raw 存实体 + 搜索原始 JSON 无删减。"""
     qid, search_raw = _find_qid(query)
     if not qid:
         return None
@@ -64,5 +64,14 @@ def fetch_wikidata(query: str) -> dict | None:
         t = (tv.get("value") or {}).get("time")
         if t and len(t) >= 5 and t[1:5].isdigit():
             info["year"] = t[1:5]
+            break
+    for claim in (ent.get("claims") or {}).get("P2437", []):
+        # P2437「季数」是 quantity，amount 形如 "+3"；去正负号取整数部分（截掉 .0）
+        dv = (claim.get("mainsnak") or {}).get("datavalue") or {}
+        amt = (dv.get("value") or {}).get("amount")
+        if amt:
+            num = str(amt).lstrip("+-").split(".")[0]
+            if num.isdigit():
+                info["seasons"] = num
             break
     return info or None

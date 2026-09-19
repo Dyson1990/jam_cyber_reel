@@ -274,6 +274,7 @@ async def _gen_prompt(config_mgr, profile, db, prompt_area):
             fetch_infos, batch,
             config_mgr.get_profile_config(profile).get("tmdb_api_key", ""),
             profile,
+            config_mgr.get_profile_config(profile).get("tvdb_api_key", ""),
         )
     prompt = build_prompt(names, limit=limit, infos=infos, is_tv=profile == "tv")
     if not prompt_area.is_deleted:
@@ -423,6 +424,7 @@ async def _gen_fix_prompt(config_mgr, profile, db, prompt_area):
         fetch_infos, names,
         config_mgr.get_profile_config(profile).get("tmdb_api_key", ""),
         profile,
+        config_mgr.get_profile_config(profile).get("tvdb_api_key", ""),
     )
     prompt = build_fix_prompt(names, infos=infos, is_tv=profile == "tv")
     if not prompt_area.is_deleted:

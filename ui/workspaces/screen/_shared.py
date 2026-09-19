@@ -158,6 +158,13 @@ def save_tmdb_key(config_mgr, profile, value, key_input):
         key_input.set_value(mask_key(value))
 
 
+def save_tvdb_key(config_mgr, profile, value, key_input):
+    """录入 TVDB key：非空才覆盖保存，并刷新输入框为脱敏显示。"""
+    if value:
+        config_mgr.update_profile_config(profile, "tvdb_api_key", value)
+        key_input.set_value(mask_key(value))
+
+
 def build_log_panel():
     """渲染右侧共享日志面板（absolute 定位，与左侧卡片严格等高）。"""
     global _log_container, _log_scroll_nicegui_id

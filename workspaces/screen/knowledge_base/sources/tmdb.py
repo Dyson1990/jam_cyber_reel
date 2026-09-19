@@ -41,8 +41,13 @@ def _http_json(url: str, timeout: float = 8.0):
     return json.loads(out.stdout.decode("utf-8"))
 
 
-def _is_cjk(s: str) -> bool:
-    return any("一" <= c <= "鿿" for c in s)
+def _is_latin(s: str) -> bool:
+    """英文名正向判断：所有字符都在拉丁区（含变音，U+0000–U+024F）。
+
+    超过此区（中日韩/假名/韩文/西里尔/阿拉伯/泰文…）即非英文名。
+    用白名单而非黑名单，换任何语言都不会误判。
+    """
+    return bool(s) and all(c <= "ɏ" for c in s)
 
 
 def _movie_detail(mid, api_key: str) -> dict | None:
@@ -71,22 +76,28 @@ def fetch_tmdb(query: str, api_key: str) -> dict | None:
     results = data.get("results", []) if isinstance(data, dict) else []
     if not results:
         return None
-    r = results[0]
+    # 精确匹配优先：TMDB 常把含搜索词的长名排在精确项前（暗黑者 vs 暗黑），取完全一致者避免错配
+    q = query.strip().casefold()
+    exact = next((x for x in results
+                  if (x.get("title") or "").strip().casefold() == q
+                  or (x.get("original_title") or "").strip().casefold() == q), None)
+    r = exact or results[0]
     info: dict = {"raw": {"search": data}}
-    if r.get("title"):
-        info["zh"] = r["title"]
+    title = (r.get("title") or "").strip()
+    if title and not _is_latin(title):
+        info["zh"] = title
     rd = r.get("release_date") or ""
     if rd and rd[:4].isdigit():
         info["year"] = rd[:4]
     ot = r.get("original_title") or ""
-    if ot and not _is_cjk(ot):
+    if ot and _is_latin(ot):
         info["en"] = ot
     elif r.get("id"):
         det = _movie_detail(r["id"], api_key)
         if det:
             info["raw"]["movie"] = det
             en = (det.get("title") or "").strip()
-            if en and not _is_cjk(en):
+            if en and _is_latin(en):
                 info["en"] = en
     return info or None
 
@@ -109,7 +120,12 @@ def fetch_tmdb_tv(query: str, api_key: str) -> dict | None:
     results = data.get("results", []) if isinstance(data, dict) else []
     if not results:
         return None
-    r = results[0]
+    # 精确匹配优先：TMDB 常把含搜索词的长名排在精确项前（暗黑者 vs 暗黑），取完全一致者避免错配
+    q = query.strip().casefold()
+    exact = next((x for x in results
+                  if (x.get("name") or "").strip().casefold() == q
+                  or (x.get("original_name") or "").strip().casefold() == q), None)
+    r = exact or results[0]
     info: dict = {"raw": {"search": data}}
     det = None
     if r.get("id"):
@@ -123,19 +139,34 @@ def fetch_tmdb_tv(query: str, api_key: str) -> dict | None:
         if isinstance(det, dict):
             info["raw"]["tv"] = det
     src = det if isinstance(det, dict) else r
-    if src.get("name"):
-        info["zh"] = src["name"]
+    name = (src.get("name") or "").strip()
+    if name and not _is_latin(name):
+        info["zh"] = name
     ot = src.get("original_name") or ""
-    if ot and not _is_cjk(ot):
+    if ot and _is_latin(ot):
         info["en"] = ot
+    elif r.get("id"):
+        # 原名非拉丁（日漫原名是日文、中文剧原名是中文）→ 回 en-US 取英文名
+        durl_en = f"{TMDB_TV_URL.format(tid=r['id'])}?" + urllib.parse.urlencode({
+            "api_key": api_key, "language": "en-US",
+        })
+        try:
+            det_en = _http_json(durl_en)
+        except Exception:
+            det_en = None
+        if isinstance(det_en, dict):
+            info["raw"]["tv_en"] = det_en
+            en = (det_en.get("name") or "").strip()
+            if en and _is_latin(en):
+                info["en"] = en
     years: list[str] = []
     if isinstance(det, dict):
         for s in det.get("seasons", []) or []:
             if not isinstance(s, dict) or not s.get("season_number"):
                 continue  # 跳过 season 0（特辑/花絮）
             ad = str(s.get("air_date") or "")[:4]
-            if ad.isdigit() and ad not in years:
-                years.append(ad)
+            if ad.isdigit():
+                years.append(ad)  # 一季一年份，保留重复（多季同年）
         if det.get("number_of_seasons"):
             info["seasons"] = str(det["number_of_seasons"])
         if det.get("status") in _FINISHED_STATUS:

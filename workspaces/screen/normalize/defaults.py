@@ -11,4 +11,5 @@ DEFAULTS = {
     "ai_batch_size": 20,
     "ai_douban": False,
     "tmdb_api_key": "",
+    "tvdb_api_key": "",
 }

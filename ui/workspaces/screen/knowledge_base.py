@@ -1,52 +1,27 @@
 """
-知识库模块（screen）— chromadb 映射浏览 + AI 扩充。
+知识库模块（screen）— chromadb 映射浏览 + AI 扩充 + 豆瓣修正。
 
-展示：表格列出 chromadb 中「中文名/英文名/年份/豆瓣评分」，顶部可选
-      「综合（自纠错结果）」或「豆瓣」两种视图。
-扩充：点「更新」，从数据库中取 from/to/root 全部媒体文件路径，
-      AI 提取文件名中的中英文名，去重后逐条走数据源固化进知识库。
+展示：表格列出 chromadb 中「中文名/英文名/年份/豆瓣评分」（电视剧加季数/完结）。
+扩充：点「更新」，从数据库取 from/to/root 全部媒体文件，AI 提取中英文名后逐条走
+      豆瓣外源（TMDB/时光网/维基）固化；点「豆瓣修正」，用已有中英文名回豆瓣补评分等字段。
 """
 
 import asyncio
+import urllib.error
 from pathlib import Path
 
 from nicegui import ui
 
 from core.logging_config import get_logger
 from workspaces.screen.overview import get_deepseek_key
-from workspaces.screen.knowledge_base import kb_list, kb_lookup, kb_upsert
-from workspaces.screen.knowledge_base.sources.douban import parse_apizero
+from workspaces.screen.knowledge_base import kb_list, kb_lookup, kb_upsert, kb_delete
 from ui.state import tag
 from ui.workspaces.screen._shared import (
     log, clear_log, set_running, set_ready, set_error,
-    run_button, build_profile_radio, build_log_panel, mask_key, save_tmdb_key,
+    run_button, build_profile_radio, build_log_panel, mask_key, save_tmdb_key, save_tvdb_key,
 )
 
 logger = get_logger(__name__)
-
-
-def _table_rows(mode: str, profile: str) -> list[dict]:
-    """取表格行。豆瓣=只看含豆瓣一手数据的条目并展示豆瓣字段；综合=全部条目最终值。"""
-    rows = []
-    for e in kb_list(profile):
-        if mode == "douban":
-            apz = ((e.get("raw") or {}).get("douban") or {}).get("apizero")
-            if not isinstance(apz, dict):
-                continue
-            d = parse_apizero(apz)
-            if not d:
-                continue
-            rows.append({
-                "zh": d.get("zh", ""), "en": d.get("en", ""),
-                "year": d.get("year", ""), "score": d.get("score", ""),
-            })
-        else:
-            rows.append({
-                "zh": e.get("zh", ""), "en": e.get("en", ""),
-                "year": e.get("year", ""), "score": e.get("score", ""),
-                "seasons": e.get("seasons", ""), "finished": e.get("finished", ""),
-            })
-    return rows
 
 
 def build_kb(config_mgr, db, registry):
@@ -67,13 +42,8 @@ def build_kb(config_mgr, db, registry):
                     "从数据库取 from/to/root 全部文件，AI 提取片名后逐条走数据源固化。"
                 ).classes("text-sm text-slate-500 font-mono mb-3")
 
-                mode_radio = ui.radio(
-                    {"all": "综合（自纠错结果）", "douban": "豆瓣"},
-                    value="all",
-                ).props("inline").classes("mb-3 text-cyan-300")
-
                 tmdb_key = cfg.get("tmdb_api_key", "")
-                with ui.row().classes("gap-2 items-center w-full mb-3"):
+                with ui.row().classes("gap-2 items-center w-full mb-2"):
                     ui.label("TMDB Key:").classes("text-xs text-slate-500 font-mono w-24")
                     tmdb_input = ui.input(
                         value=mask_key(tmdb_key) if tmdb_key else "",
@@ -81,28 +51,44 @@ def build_kb(config_mgr, db, registry):
                     ).props("outlined dense dark").classes("flex-1 font-mono text-xs").on_value_change(
                         lambda e: save_tmdb_key(config_mgr, profile, e.value or "", tmdb_input),
                     )
+                if profile == "tv":
+                    tvdb_key = cfg.get("tvdb_api_key", "")
+                    with ui.row().classes("gap-2 items-center w-full mb-3"):
+                        ui.label("TVDB Key:").classes("text-xs text-slate-500 font-mono w-24")
+                        tvdb_input = ui.input(
+                            value=mask_key(tvdb_key) if tvdb_key else "",
+                            placeholder="未设置（电视剧中文名/季数兜底）" if not tvdb_key else "输入新 Key 覆盖",
+                        ).props("outlined dense dark").classes("flex-1 font-mono text-xs").on_value_change(
+                            lambda e: save_tvdb_key(config_mgr, profile, e.value or "", tvdb_input),
+                        )
 
-                run_button(
-                    "▶ 更新", "cyan",
-                    lambda: _run_update(
-                        config_mgr, profile, db, mode_radio.value, _render_table,
-                    ),
-                )
+                with ui.row().classes("gap-2"):
+                    run_button(
+                        "▶ 更新", "cyan",
+                        lambda: _run_update(config_mgr, profile, db, _render_table),
+                    )
+                    run_button(
+                        "▶ 豆瓣修正", "green",
+                        lambda: _run_douban_fix(profile, _render_table),
+                    )
 
             with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"):
                 tag("kb-manual")
                 ui.label("◆ 人工更新").classes("text-lg font-mono text-cyan-400 mb-2")
                 with ui.row().classes("gap-2 items-center w-full"):
                     zh_input = ui.input(placeholder="中文名").classes(
-                        "flex-1 font-mono text-xs").props("outlined dense dark")
+                        "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
                     en_input = ui.input(placeholder="英文名").classes(
-                        "flex-1 font-mono text-xs").props("outlined dense dark")
+                        "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
                     year_input = ui.input(placeholder="年份").classes(
-                        "w-24 font-mono text-xs").props("outlined dense dark")
+                        "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
                     score_input = ui.input(placeholder="豆瓣评分(可空)").classes(
-                        "w-32 font-mono text-xs").props("outlined dense dark")
+                        "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
+                    seasons_input = ui.input(placeholder="季数").classes(
+                        "w-20 font-mono text-xs").props("outlined dense dark")
                     finished_switch = ui.switch("完结").props("color=cyan").classes("ml-2")
                     if profile != "tv":
+                        seasons_input.set_visibility(False)
                         finished_switch.set_visibility(False)
                     ui.button("✔ 保存", on_click=lambda: _manual_save()).classes(
                         "bg-cyan-900 hover:bg-cyan-700 text-cyan-300 font-mono text-sm "
@@ -116,26 +102,60 @@ def build_kb(config_mgr, db, registry):
 
         build_log_panel()
 
+    def _save_row(cid, title, raw, zh_i, en_i, year_i, score_i, seasons_i, finished_i):
+        """编辑保存：按稳定 id 删旧写新，避免改中英文名导致 id 漂移产生孤儿条目。"""
+        zh = (zh_i.value or "").strip()
+        en = (en_i.value or "").strip()
+        if not zh and not en:
+            ui.notify("中文名 / 英文名至少填一个", type="warning")
+            return
+        kb_delete(cid, profile=profile)
+        kb_upsert(zh, en, (year_i.value or "").strip(), (score_i.value or "").strip(),
+                  title, raw, profile=profile,
+                  seasons=(seasons_i.value or "").strip() if seasons_i else "",
+                  finished=(finished_i.value or "").strip() if finished_i else "")
+        log(f"  ✓ 已修改: {zh or en}", "green")
+        _render_table()
+
     def _render_table():
         if table_container.is_deleted:
             return
         table_container.clear()
         with table_container:
-            rows = _table_rows(mode_radio.value, profile)
+            rows = kb_list(profile)
             if not rows:
                 ui.label("(知识库为空)").classes("text-xs text-slate-500 font-mono")
                 return
-            cols = [
-                {"name": "zh", "label": "中文名", "field": "zh", "align": "left"},
-                {"name": "en", "label": "英文名", "field": "en", "align": "left"},
-                {"name": "year", "label": "年份", "field": "year", "align": "left",
-                 "style": "white-space: normal; word-break: break-all;"},
-                {"name": "score", "label": "豆瓣评分", "field": "score", "align": "left"},
-            ]
+            headers = [("中文名", "flex-1"), ("英文名", "flex-1"),
+                       ("年份", "flex-1"), ("豆瓣评分", "flex-1")]
             if profile == "tv":
-                cols.append({"name": "seasons", "label": "季数", "field": "seasons", "align": "left"})
-                cols.append({"name": "finished", "label": "完结", "field": "finished", "align": "left"})
-            ui.table(columns=cols, rows=rows).classes("w-full")
+                headers += [("季数", "w-16"), ("完结", "w-20")]
+            with ui.row().classes("w-full gap-1 items-center mb-1"):
+                for label, w in headers:
+                    ui.label(label).classes(f"{w} min-w-0 text-xs text-slate-500 font-mono")
+                ui.label("").classes("w-8")
+            for e in rows:
+                cid = e["_id"]
+                title = e.get("title", "")
+                raw = e.get("raw") or {}
+                with ui.row().classes("w-full gap-1 items-center mb-1"):
+                    zh_i = ui.input(value=e.get("zh", "")).classes(
+                        "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
+                    en_i = ui.input(value=e.get("en", "")).classes(
+                        "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
+                    year_i = ui.input(value=e.get("year", "")).classes(
+                        "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
+                    score_i = ui.input(value=e.get("score", "")).classes(
+                        "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
+                    seasons_i = finished_i = None
+                    if profile == "tv":
+                        seasons_i = ui.input(value=e.get("seasons", "")).classes(
+                            "w-16 font-mono text-xs").props("outlined dense dark")
+                        finished_i = ui.input(value=e.get("finished", "")).classes(
+                            "w-20 font-mono text-xs").props("outlined dense dark")
+                    ui.button("✔", on_click=lambda: _save_row(
+                        cid, title, raw, zh_i, en_i, year_i, score_i, seasons_i, finished_i,
+                    )).props("dense flat color=cyan").classes("w-8")
 
     def _manual_save():
         """人工补充数据源缺失：直接写入知识库（title 留空，id 由中文名>英文名派生）。"""
@@ -147,21 +167,19 @@ def build_kb(config_mgr, db, registry):
             ui.notify("中文名 / 英文名至少填一个", type="warning")
             return
         kb_upsert(zh, en, year, score, "", profile=profile,
+                  seasons=(seasons_input.value or "").strip(),
                   finished="完结" if finished_switch.value else "")
         zh_input.value = en_input.value = year_input.value = score_input.value = ""
+        seasons_input.value = ""
         finished_switch.value = False
         _render_table()
         ui.notify("已写入知识库", type="positive")
 
-    mode_radio.on_value_change(lambda e: _render_table())
     _render_table()
 
 
-async def _run_update(config_mgr, profile, db, mode, render_cb):
-    """更新知识库：取数据库 from/to/root 文件 → AI 提取中英名 → 去重后逐条 fetch_info 固化。
-
-    mode: "douban" 仅豆瓣源；"all" 仅豆瓣之外的其它源自纠错。
-    """
+async def _run_update(config_mgr, profile, db, render_cb):
+    """更新知识库：取数据库 from/to/root 文件 → AI 提取中英名 → 去重后逐条走豆瓣外源自纠错固化。"""
     # 惰性导入：ai_naming 拖 LangChain、sources 拖 chromadb，只在真正更新时才加载
     from workspaces.screen.normalize import extract_names
     from workspaces.screen.knowledge_base.sources import fetch_info, reset_breakers, SEARCH_DELAY, extract_year
@@ -192,7 +210,8 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
     cfg = config_mgr.get_profile_config(profile)
     key = get_deepseek_key(config_mgr)
     tmdb_key = cfg.get("tmdb_api_key", "")
-    log(f"◆ 数据源模式：{'豆瓣' if mode == 'douban' else '综合（豆瓣外源）'}", "cyan")
+    tvdb_key = cfg.get("tvdb_api_key", "")
+    log("◆ 数据源：综合（豆瓣外源自纠错）", "cyan")
 
     if pending:
         if not key:
@@ -245,7 +264,7 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
             skipped += 1
             continue
         try:
-            info = await asyncio.to_thread(fetch_info, q, tmdb_key, mode, extract_year(name), profile)
+            info = await asyncio.to_thread(fetch_info, q, tmdb_key, "all", extract_year(name), profile, tvdb_key)
         except Exception as e:
             logger.warning("取信息失败 %s: %s", q, e)
             info = None
@@ -262,5 +281,74 @@ async def _run_update(config_mgr, profile, db, mode, render_cb):
         await asyncio.sleep(SEARCH_DELAY)  # 限流，避免 apizero 429
 
     log(f"◆ 完成：新增 {added} 条，跳过 {skipped} 条", "cyan")
+    render_cb()
+    set_ready()
+
+
+def _douban_wait(exc) -> str:
+    """从 429 响应提取还需等待的时长文案（Retry-After 秒数，无则默认 60 秒）。"""
+    secs = 60
+    headers = getattr(exc, "headers", None) or {}
+    try:
+        secs = int(headers.get("Retry-After", secs))
+    except (TypeError, ValueError):
+        secs = 60
+    return f"{secs} 秒" if secs < 60 else f"{secs // 60} 分钟"
+
+
+async def _run_douban_fix(profile, render_cb):
+    """豆瓣修正：对知识库中无豆瓣评分的条目，用已有中英文名回豆瓣补字段（豆瓣数据优先）。
+
+    英文名优先作查询词；中英文名沿用已有，其余字段（评分/年份/季数/是否完结）以豆瓣为准，
+    豆瓣缺失才保留已有。豆瓣 429 达访问上限即停止，红字提示剩余等待时间。
+    """
+    from workspaces.screen.knowledge_base.sources import SEARCH_DELAY
+    from workspaces.screen.knowledge_base.sources.douban import fetch_douban, fetch_douban_tv
+
+    clear_log()
+    set_running("豆瓣修正")
+
+    rows = kb_list(profile)
+    pending = [r for r in rows if not (r.get("score") or "").strip()]
+    if not pending:
+        log("  无待修正条目（均有豆瓣评分）", "gray")
+        set_ready()
+        return
+    log(f"  待修正 {len(pending)} 条（无豆瓣评分），英文名优先回豆瓣", "gray")
+
+    fixed = skipped = 0
+    for r in pending:
+        q = (r.get("en") or r.get("zh") or "").strip()
+        if not q:
+            skipped += 1
+            continue
+        try:
+            info = fetch_douban_tv(q) if profile == "tv" else fetch_douban(q)
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                log(f"  ✕ 豆瓣访问达上限，约 {_douban_wait(e)} 后可继续", "red")
+                break
+            info = None
+        except Exception:
+            info = None
+        if not info:
+            skipped += 1
+            continue
+        raw = dict(r.get("raw") or {})
+        if info.get("raw"):
+            raw["douban"] = info["raw"]
+        kb_upsert(
+            r.get("zh", ""), r.get("en", ""),
+            info.get("year") or r.get("year", ""),
+            info.get("score") or "",
+            r.get("title", ""), raw, profile=profile,
+            seasons=info.get("seasons") or r.get("seasons", ""),
+            finished=info.get("finished") or r.get("finished", ""),
+        )
+        fixed += 1
+        log(f"  ✓ {q} → 评分[{info.get('score') or '-'}]/年份[{info.get('year') or '-'}]", "green")
+        await asyncio.sleep(SEARCH_DELAY)
+
+    log(f"◆ 完成：修正 {fixed} 条，跳过 {skipped} 条", "cyan")
     render_cb()
     set_ready()

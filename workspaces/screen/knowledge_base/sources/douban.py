@@ -174,7 +174,8 @@ def fetch_douban_tv(query: str, year: str = "") -> dict | None:
         cards = [c for c in cards if (c.get("sub_title") or "").strip().casefold() == sub.casefold()]
     nums = [n for n in (_season_num(c.get("title") or "") for c in cards) if n]
     seasons = str(max(nums)) if nums else ""
-    years = sorted({str(c.get("year") or "")[:4] for c in cards if str(c.get("year") or "")[:4].isdigit()})
+    # 一季一年份，按卡片顺序保留重复（多季同年）
+    years = [str(c.get("year") or "")[:4] for c in cards if str(c.get("year") or "")[:4].isdigit()]
     finished = "" if any((c.get("episode") or "") in ("", "unknow") for c in cards) else "完结"
 
     apz = _apizero_info(str(primary.get("id") or "")) if primary.get("id") else {}

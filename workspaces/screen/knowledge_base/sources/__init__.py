@@ -13,7 +13,8 @@ import time
 from ..store import kb_lookup, kb_upsert
 from .douban import fetch_douban, fetch_douban_tv, title_query, SEARCH_DELAY, extract_year
 from .mtime import fetch_mtime
-from .tmdb import fetch_tmdb, fetch_tmdb_tv
+from .tmdb import fetch_tmdb, fetch_tmdb_tv, _is_latin
+from .tvdb import fetch_tvdb
 from .wikidata import fetch_wikidata
 
 logger = logging.getLogger(__name__)
@@ -82,15 +83,22 @@ def _consensus_tv(cands: list[dict]) -> dict | None:
 
 
 def _persist(info: dict, query: str, raw: dict | None, profile: str) -> dict:
+    zh = (info.get("zh") or "").strip()
+    en = (info.get("en") or "").strip()
+    if zh and _is_latin(zh):
+        # 源返回的「中文名」实为英文（该片无中文译名）→ 归入英文名，中文名留空
+        en = en or zh
+        zh = ""
+        info["zh"], info["en"] = zh, en
     kb_upsert(
-        info.get("zh", ""), info.get("en", ""), info.get("year", ""),
+        zh, en, info.get("year", ""),
         info.get("score", ""), query, raw, profile=profile,
         seasons=info.get("seasons", ""), finished=info.get("finished", ""),
     )
     return info
 
 
-def _fetch_tv(query: str, tmdb_key: str, mode: str, year: str) -> dict | None:
+def _fetch_tv(query: str, tmdb_key: str, tvdb_key: str, mode: str, year: str) -> dict | None:
     """剧名 → {zh,en,year,seasons,score,finished,raw}。与电影同构，仅源函数换成电视剧版。
 
     电视剧逐季逐集更新，季数/是否完结每次重查数据源（不查缓存短路）。
@@ -113,6 +121,12 @@ def _fetch_tv(query: str, tmdb_key: str, mode: str, year: str) -> dict | None:
             if t.get("raw"):
                 raw["tmdb"] = t["raw"]
             cands.append(t)
+    if tvdb_key:
+        v = _call("tvdb", lambda: fetch_tvdb(query, tvdb_key))
+        if v:
+            if v.get("raw"):
+                raw["tvdb"] = v["raw"]
+            cands.append(v)
     w = _call("wikidata", lambda: fetch_wikidata(query))
     if w:
         if w.get("raw"):
@@ -130,7 +144,7 @@ def _fetch_tv(query: str, tmdb_key: str, mode: str, year: str) -> dict | None:
     return _persist(out, query, raw, "tv")
 
 
-def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto", year: str = "", profile: str = "movie") -> dict | None:
+def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto", year: str = "", profile: str = "movie", tvdb_key: str = "") -> dict | None:
     """片名 → {zh,en,year,score,raw}。
 
     mode 决定用哪些源：
@@ -140,7 +154,7 @@ def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto", year: str = "
     profile 决定写入/读取哪个 profile 的知识库集合（movie/tv 分开）；tv 逐季更新不查缓存。
     """
     if profile == "tv":
-        return _fetch_tv(query, tmdb_key, mode, year)
+        return _fetch_tv(query, tmdb_key, tvdb_key, mode, year)
     cached = kb_lookup(query, profile=profile)
     if cached:
         return cached
@@ -181,7 +195,7 @@ def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto", year: str = "
     return _persist(out, query, raw, profile)
 
 
-def fetch_infos(names: list[str], tmdb_key: str = "", profile: str = "movie") -> dict[str, dict]:
+def fetch_infos(names: list[str], tmdb_key: str = "", profile: str = "movie", tvdb_key: str = "") -> dict[str, dict]:
     """批量取信息 {文件名: {zh,en,year,score}}；请求间延时规避限流，单条失败跳过。"""
     reset_breakers()
     infos: dict[str, dict] = {}
@@ -190,7 +204,7 @@ def fetch_infos(names: list[str], tmdb_key: str = "", profile: str = "movie") ->
         if not q:
             continue
         try:
-            info = fetch_info(q, tmdb_key, year=extract_year(n), profile=profile)
+            info = fetch_info(q, tmdb_key, year=extract_year(n), profile=profile, tvdb_key=tvdb_key)
         except Exception as e:
             logger.warning("取信息失败 %s: %s", q, e)
         else:

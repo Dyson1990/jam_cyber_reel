@@ -105,6 +105,7 @@ def kb_list(profile: str = "movie") -> list[dict]:
     for i, mid in enumerate(res["ids"]):
         m = res["metadatas"][i]
         row = {k: m.get(k, "") for k in ("zh", "en", "year", "score", "seasons", "finished", "title")}
+        row["_id"] = mid  # 编辑时按稳定 id 定位，避免改中文名导致 id 漂移
         if m.get("raw"):
             try:
                 row["raw"] = json.loads(m["raw"])
@@ -112,3 +113,13 @@ def kb_list(profile: str = "movie") -> list[dict]:
                 pass
         out.append(row)
     return out
+
+
+def kb_delete(cid: str, profile: str = "movie") -> None:
+    """按 chromadb id 删除一条（编辑改中文名/英文名会换 id，须先删旧再写新）。"""
+    if not cid:
+        return
+    try:
+        _get_collection(profile).delete(ids=[cid])
+    except Exception:
+        logger.warning("知识库删除失败 %s", cid, exc_info=True)
