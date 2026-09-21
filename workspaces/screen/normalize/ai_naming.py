@@ -70,7 +70,8 @@ _SLOT_RULES: list[dict[str, str]] = [
     },
     {
         "topic": "字幕",
-        "content": "来源=原文件名，必填。CHS=中文、ENG=英文；中英字幕/中英双字/CHS.ENG/CHS-ENG → .中英字幕；"
+        "content": "来源=原文件名，必填。CHS=中文、ENG=英文；中文字幕/CHS → .中文字幕；"
+        "中英字幕/中英双字/CHS.ENG/CHS-ENG → .中英字幕；"
         "特效中英字幕 → .特效中英字幕；修正特效中英字幕 → .修正特效中英字幕；没有任何字幕标记则写 .无字幕。",
     },
     {
@@ -114,26 +115,34 @@ RULES: list[dict[str, str]] = [
 TV_RULES: list[dict[str, str]] = [
     {
         "topic": "总原则",
-        "content": "只使用原文件夹名已有字段或「## 查询结果」给出的字段，绝不臆造年份、评分、片名等任何信息。"
-        "电视剧以文件夹为单元：标准化的对象是「系列文件夹名」（from/to/root 顶层的一部剧一个文件夹）。"
-        "「中文名/英文名」两槽位必填：文件夹名与查询结果都取不到时，该文件夹不写入映射，"
-        "改为在 _errors 中报告错误。",
+        "content": "只使用原集文件名已有字段或「## 查询结果」给出的字段，绝不臆造年份、季集号、评分、片名等任何信息。"
+        "标准化对象是每个「系列文件夹」内的**集文件**：中文名/英文名/年份以「## 查询结果」该系列文件夹为准"
+        "（必填），集文件的季号/集号/版本信息/视频参数从原集文件名提取；字幕信息优先从原集文件名提取，"
+        "集文件名无字幕标记时沿用该系列文件夹名里的字幕标记（如「[中文字幕]」→ .中文字幕）。",
     },
     {
         "topic": "标准格式",
-        "content": "电视剧目录三级结构："
+        "content": "电视剧目录三级结构（新相对路径用 / 分隔）："
         "系列文件夹=[中文名].[英文名]；"
-        "季子文件夹=[中文名].[英文名].[第X季].[年份]；"
-        "集文件=[中文名].[英文名].[第X季第Y集].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]（与电影模板一致）。"
-        "本步骤只输出「系列文件夹名 → 新系列文件夹名」映射，中文名/英文名必填。",
+        "季文件夹=S{两位季号}.[中文名].[英文名].[该季年份]（季号在最前，如 S01.DOTA：龙之血.DOTA：Dragon's_Blood.2021）；"
+        "集文件=[中文名].[英文名].S{两位季号}E{两位集号}.[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]（与电影模板一致）。"
+        "输出 JSON：key 为原集文件相对路径，value 为上述三级结构的新相对路径。",
+    },
+    {
+        "topic": "季集号",
+        "content": "季号/集号从原集文件名提取：S01E02 → S01E02；第2集 → S01E02；E03/EP03 → S01E03；"
+        "02 → S01E02；完全取不到季集号则该集第1季、集号沿用数字序，仍取不到则跳过该集报错。"
+        "季号/集号统一两位零填充（S01、E02），不足两位前面补 0。"
+        "季文件夹年份取「## 查询结果」该系列的逐季年份（「、」分隔，第X季取第X个；个数不足用最后一个补齐）。",
     },
     *_SLOT_RULES,
     {
         "topic": "示例",
-        "content": "权力的游戏.Game.of.Thrones（查询给英文名 Game of Thrones）→ 权力的游戏.Game_of_Thrones；"
-        "老友记.Friends → 老友记.Friends；"
-        "越狱.Prison.Break.2005 → 越狱.Prison_Break；"
-        "xxx（文件夹名与查询都给不出中文名/英文名）→ 不写入映射，报错：缺中文名/英文名。",
+        "content": "茶杯头大冒险/S01E02.1080p.mkv（查询：中文名 茶杯头大冒险、英文名 The Cuphead Show、逐季年份 2022、2022、2022）→ "
+        "茶杯头大冒险.The_Cuphead_Show/S01.茶杯头大冒险.The_Cuphead_Show.2022/茶杯头大冒险.The_Cuphead_Show.S01E02.1080p.无字幕.mkv；"
+        "越狱/Prison.Break.S01E01.mkv（查询：中文名 越狱、英文名 Prison Break、逐季年份 2005）→ "
+        "越狱.Prison_Break/S01.越狱.Prison_Break.2005/越狱.Prison_Break.S01E01.mkv；"
+        "xxx/abc.mkv（查询与文件名都给不出中文名/英文名）→ 不写入映射，报错：缺中文名/英文名。",
     },
 ]
 
@@ -142,6 +151,17 @@ _JSON_INSTRUCTION = (
     "仅输出一个 JSON 字典：key 为原文件名，value 为标准化后的文件名；"
     "必填槽位取不到、无法标准化的文件不要作为 key 写入映射，"
     "改放入 \"_errors\" 键，值为数组，每项 {\"file\": 原文件名, \"reason\": 缺失说明}；"
+    "不要输出任何其他文字或解释。"
+)
+
+_TV_JSON_INSTRUCTION = (
+    "\n\n## 输出要求\n"
+    "仅输出一个 JSON 字典：key 为原相对路径 = 【系列文件夹】名 + \"/\" + 集文件名；"
+    "集文件名按展示还原——有「公共前缀/公共后缀」的文件夹，集文件名 = 公共前缀 + 差异部分 + 公共后缀；"
+    "仅单个集文件的文件夹直接取展示名。"
+    "value 为标准化后的三级相对路径（系列文件夹/季文件夹/集文件，用 / 分隔）；"
+    "必填槽位取不到、无法标准化的集文件不要作为 key 写入映射，"
+    "改放入 \"_errors\" 键，值为数组，每项 {\"file\": 原相对路径, \"reason\": 缺失说明}；"
     "不要输出任何其他文字或解释。"
 )
 
@@ -231,6 +251,106 @@ def build_prompt(
         f"## 规则\n{context}\n\n"
         f"## 待标准化{unit}\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
     )
+
+
+def _tv_info_section(infos: dict[str, dict] | None) -> str:
+    """组装「## 查询结果」段落：按系列文件夹给出中文名/英文名/逐季年份/季数。"""
+    if not infos:
+        return ""
+    rows = []
+    for folder, info in infos.items():
+        parts = [
+            f"{label}={info[key]}"
+            for key, label in (("zh", "中文名"), ("en", "英文名"), ("year", "逐季年份"), ("seasons", "季数"))
+            if info.get(key)
+        ]
+        if parts:
+            rows.append(f"- 「{folder}」：{'，'.join(parts)}")
+    if not rows:
+        return ""
+    return "\n\n## 查询结果（系列文件夹 → 各字段）\n" + "\n".join(rows)
+
+
+def _tv_episode_blocks(episodes: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """按系列文件夹分组压缩集文件，返回 ([(文件夹名, 展示块)], [无法总结被跳过的文件夹])，保持出现顺序。
+
+    集文件名大多只有集号/集名/季号不同，公共前缀（片名/发布组）+公共后缀（画质/封装/扩展名）
+    逐集重复，白白烧 token；这里前后缀各写一次，只列每集差异部分。无公共前后缀的文件夹
+    （各集名称差距过大）无法总结，跳过并列入返回第二项，由调用方警告。
+    """
+    groups: dict[str, list[str]] = {}
+    order: list[str] = []
+    for ep in episodes:
+        folder, _, name = ep.partition("/")
+        if folder not in groups:
+            groups[folder] = []
+            order.append(folder)
+        groups[folder].append(name)
+
+    blocks: list[tuple[str, str]] = []
+    skipped: list[str] = []
+    for folder in order:
+        names = groups[folder]
+        if len(names) == 1:
+            blocks.append((folder, f"【{folder}】\n1. {names[0]}"))
+            continue
+        toks = [n.split(".") for n in names]
+        min_len = min(len(t) for t in toks)
+        p = 0
+        while p < min_len and all(t[p] == toks[0][p] for t in toks):
+            p += 1
+        s = 0
+        while s < min_len - p and all(t[-1 - s] == toks[0][-1 - s] for t in toks):
+            s += 1
+        if p == 0 and s == 0:
+            skipped.append(folder)
+            continue
+        # 公共前后缀允许一侧为空（如 01.mp4…12.mp4 仅公共后缀 .mp4），
+        # 空侧不加点号，保证「公共前缀+差异部分+公共后缀」能原样还原集文件名。
+        prefix = (".".join(toks[0][:p]) + ".") if p else ""
+        suffix = ("." + ".".join(toks[0][-s:])) if s else ""
+        middles = [".".join(t[p:len(t) - s]) for t in toks]
+        if not any(middles):
+            skipped.append(folder)
+            continue
+        rows = "\n".join(f"{i}. {m}" for i, m in enumerate(middles, 1))
+        blocks.append((folder, f"【{folder}】\n公共前缀：{prefix}\n公共后缀：{suffix}\n差异部分：\n{rows}"))
+    return blocks, skipped
+
+
+def tv_summarizable(episodes: list[str]) -> tuple[list[str], list[str]]:
+    """判定每个系列能否总结，返回 (可总结系列名顺序, 无法总结被跳过的系列名)。
+
+    供调用方在查库前按「每次季数」limit 截断并对齐「查询结果」：跳过的系列不占名额、
+    不写进提示词，避免「待标准化集文件」与「查询结果」剧集对不上号。
+    """
+    blocks, skipped = _tv_episode_blocks(episodes)
+    return [f for f, _ in blocks], skipped
+
+
+def _tv_episode_lines(episodes: list[str]) -> tuple[str, list[str]]:
+    blocks, skipped = _tv_episode_blocks(episodes)
+    return "\n\n".join(b for _, b in blocks), skipped
+
+
+def build_tv_prompt(
+    episodes: list[str], infos: dict[str, dict] | None = None,
+) -> tuple[str, list[str]]:
+    """TV 集文件标准化提示词：输入 from 下每集相对路径，输出 {原相对路径: 新三级相对路径}。
+
+    返回 (提示词文本, 无法总结被跳过的系列文件夹列表)；全部集文件都无法总结时提示词为空串。
+    """
+    context = "\n".join(f"- {d.page_content}" for d in _retrieve("\n".join(episodes), kind="tv"))
+    lines, skipped = _tv_episode_lines(episodes)
+    if not lines:
+        return "", skipped
+    prompt = (
+        "你是电视剧集文件标准化助手，请严格依据下列规则处理。\n\n"
+        f"## 规则\n{context}\n\n"
+        f"## 待标准化集文件（按系列文件夹分组，【】内为文件夹名）\n{lines}"
+        f"{_tv_info_section(infos)}{_TV_JSON_INSTRUCTION}"
+    )
+    return prompt, skipped
 
 
 def build_fix_prompt(

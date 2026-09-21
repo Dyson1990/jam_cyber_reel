@@ -14,7 +14,7 @@ _UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 )
 
-SEARCH_DELAY = 2.0  # apizero 匿名接口对连发请求会 429，请求间延时规避
+SEARCH_DELAY = 3.0  # apizero 匿名接口对连发请求会 429，请求间延时规避（电视剧多源连查，降速更稳妥）
 
 # 英文片名检索时的参数噪声词（命中即截断片名）
 _TITLE_STOP = frozenset({

@@ -82,6 +82,27 @@ def _consensus_tv(cands: list[dict]) -> dict | None:
     return None
 
 
+_last_miss: str = ""
+
+
+def last_miss_reason() -> str:
+    """返回最近一次 fetch_info 未命中原因（供 UI 日志展示），命中返回空串。"""
+    return _last_miss
+
+
+def _miss_reason(entries: list[tuple[str, dict | None]]) -> str:
+    """未命中原因归纳：无结果 / 缺中英文名 / 名字不一致，附各源返回摘要。"""
+    got = [(n, c) for n, c in entries if c]
+    if not got:
+        return "各源均无结果（不可达/限流，或库中无此剧）"
+    parts = []
+    for n, c in got:
+        zh = (c.get("zh") or "").strip()
+        en = (c.get("en") or "").strip()
+        parts.append(f"{n}[{'中英' if zh and en else '中文' if zh else '英文' if en else '无'}]")
+    return "源有结果但未过共识：" + "/".join(parts)
+
+
 def _persist(info: dict, query: str, raw: dict | None, profile: str) -> dict:
     zh = (info.get("zh") or "").strip()
     en = (info.get("en") or "").strip()
@@ -96,6 +117,35 @@ def _persist(info: dict, query: str, raw: dict | None, profile: str) -> dict:
         seasons=info.get("seasons", ""), finished=info.get("finished", ""),
     )
     return info
+
+
+def _align_tv_year(out: dict, t_tv: dict | None) -> dict:
+    """年份个数与季数对齐：季数>1 时年份按季补齐，保证展示一一对应。
+
+    TMDB 是唯一给出逐季 air_date 的源（TVDB/时光/维基只有首播年）；TMDB 季数与共识
+    结果一致时优先用其逐季年份，否则把已知首播年重复补齐（如 3 季同年 → 2022、2022、2022）。
+    """
+    try:
+        n = int(str(out.get("seasons") or ""))
+    except (TypeError, ValueError):
+        return out
+    if n <= 1:
+        return out
+    src = out.get("year") or ""
+    if t_tv:
+        try:
+            if int(str(t_tv.get("seasons") or "")) == n:
+                src = t_tv.get("year") or src
+        except (TypeError, ValueError):
+            pass
+    ys = [y for y in src.split("、") if y.strip()]
+    if not ys:
+        return out
+    if len(ys) < n:
+        ys += [ys[-1]] * (n - len(ys))
+    out = dict(out)
+    out["year"] = "、".join(ys[:n])
+    return out
 
 
 def _fetch_tv(query: str, tmdb_key: str, tvdb_key: str, mode: str, year: str) -> dict | None:
@@ -113,20 +163,21 @@ def _fetch_tv(query: str, tmdb_key: str, tvdb_key: str, mode: str, year: str) ->
         if mode == "douban":
             return None
 
-    # 豆瓣之外的源自纠错（季数/是否完结仅 TMDB 提供，随共识候选一并返回）
+    # 豆瓣之外的源自纠错（季数/是否完结仅 TMDB/TVDB 提供，随共识候选一并返回）
     cands: list[dict] = []
+    t_tv = v_tv = None
     if tmdb_key:
-        t = _call("tmdb_tv", lambda: fetch_tmdb_tv(query, tmdb_key))
-        if t:
-            if t.get("raw"):
-                raw["tmdb"] = t["raw"]
-            cands.append(t)
+        t_tv = _call("tmdb_tv", lambda: fetch_tmdb_tv(query, tmdb_key))
+        if t_tv:
+            if t_tv.get("raw"):
+                raw["tmdb"] = t_tv["raw"]
+            cands.append(t_tv)
     if tvdb_key:
-        v = _call("tvdb", lambda: fetch_tvdb(query, tvdb_key))
-        if v:
-            if v.get("raw"):
-                raw["tvdb"] = v["raw"]
-            cands.append(v)
+        v_tv = _call("tvdb", lambda: fetch_tvdb(query, tvdb_key))
+        if v_tv:
+            if v_tv.get("raw"):
+                raw["tvdb"] = v_tv["raw"]
+            cands.append(v_tv)
     w = _call("wikidata", lambda: fetch_wikidata(query))
     if w:
         if w.get("raw"):
@@ -138,10 +189,23 @@ def _fetch_tv(query: str, tmdb_key: str, tvdb_key: str, mode: str, year: str) ->
             raw["mtime"] = m["raw"]
         cands.append(m)
 
-    out = _consensus_tv(cands)
+    # TMDB+TVDB 两个专业剧库中英文名一致即强信号直接采用：wikidata/时光网对剧集常返回
+    # 错实体或无剧集，会稀释多源共识，把本可 2 票命中的误判成 2/4 未过半。
+    out = None
+    if t_tv and v_tv:
+        tz = (t_tv.get("zh") or "").strip()
+        te = (t_tv.get("en") or "").strip().casefold()
+        vz = (v_tv.get("zh") or "").strip()
+        ve = (v_tv.get("en") or "").strip().casefold()
+        if tz and te and tz == vz and te == ve:
+            out = t_tv  # 用 TMDB 候选，年份为逐季「、」连接，与既有展示一致
     if not out:
+        out = _consensus_tv(cands)
+    if not out:
+        global _last_miss
+        _last_miss = _miss_reason([("TMDB", t_tv), ("TVDB", v_tv), ("维基", w), ("时光", m)])
         return None
-    return _persist(out, query, raw, "tv")
+    return _persist(_align_tv_year(out, t_tv), query, raw, "tv")
 
 
 def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto", year: str = "", profile: str = "movie", tvdb_key: str = "") -> dict | None:
@@ -172,6 +236,7 @@ def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto", year: str = "
 
     # 豆瓣之外的源自纠错（mode="all" 直接走这里；"auto" 豆瓣失败后回退到这里）
     cands: list[dict] = []
+    t = None
     if tmdb_key:
         t = _call("tmdb", lambda: fetch_tmdb(query, tmdb_key))
         if t:
@@ -191,6 +256,8 @@ def fetch_info(query: str, tmdb_key: str = "", mode: str = "auto", year: str = "
 
     out = _consensus(cands)
     if not out:
+        global _last_miss
+        _last_miss = _miss_reason([("TMDB", t), ("维基", w), ("时光", m)])
         return None
     return _persist(out, query, raw, profile)
 

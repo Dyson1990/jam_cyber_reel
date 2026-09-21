@@ -117,6 +117,12 @@ def build_kb(config_mgr, db, registry):
         log(f"  ✓ 已修改: {zh or en}", "green")
         _render_table()
 
+    def _delete_row(cid, name):
+        """手动删除：按稳定 id 从知识库移除并刷新表格。"""
+        kb_delete(cid, profile=profile)
+        log(f"  ✕ 已删除: {name}", "red")
+        _render_table()
+
     def _render_table():
         if table_container.is_deleted:
             return
@@ -133,7 +139,7 @@ def build_kb(config_mgr, db, registry):
             with ui.row().classes("w-full gap-1 items-center mb-1"):
                 for label, w in headers:
                     ui.label(label).classes(f"{w} min-w-0 text-xs text-slate-500 font-mono")
-                ui.label("").classes("w-8")
+                ui.label("").classes("w-16")
             for e in rows:
                 cid = e["_id"]
                 title = e.get("title", "")
@@ -153,9 +159,18 @@ def build_kb(config_mgr, db, registry):
                             "w-16 font-mono text-xs").props("outlined dense dark")
                         finished_i = ui.input(value=e.get("finished", "")).classes(
                             "w-20 font-mono text-xs").props("outlined dense dark")
-                    ui.button("✔", on_click=lambda: _save_row(
-                        cid, title, raw, zh_i, en_i, year_i, score_i, seasons_i, finished_i,
-                    )).props("dense flat color=cyan").classes("w-8")
+                    # 默认参数逐个绑定循环变量，避免闭包晚绑定导致所有行按钮都作用于最后一行
+                    with ui.row().classes("gap-0 items-center w-16"):
+                        ui.button("✔", on_click=lambda cid=cid, title=title, raw=raw,
+                                  zh_i=zh_i, en_i=en_i, year_i=year_i, score_i=score_i,
+                                  seasons_i=seasons_i, finished_i=finished_i:
+                                  _save_row(cid, title, raw, zh_i, en_i, year_i, score_i,
+                                            seasons_i, finished_i)).props(
+                            "dense flat color=cyan").classes("w-8")
+                        ui.button("✕", on_click=lambda cid=cid,
+                                  name=(e.get("zh") or e.get("en")):
+                                  _delete_row(cid, name)).props(
+                            "dense flat color=red").classes("w-8")
 
     def _manual_save():
         """人工补充数据源缺失：直接写入知识库（title 留空，id 由中文名>英文名派生）。"""
@@ -182,7 +197,9 @@ async def _run_update(config_mgr, profile, db, render_cb):
     """更新知识库：取数据库 from/to/root 文件 → AI 提取中英名 → 去重后逐条走豆瓣外源自纠错固化。"""
     # 惰性导入：ai_naming 拖 LangChain、sources 拖 chromadb，只在真正更新时才加载
     from workspaces.screen.normalize import extract_names
-    from workspaces.screen.knowledge_base.sources import fetch_info, reset_breakers, SEARCH_DELAY, extract_year
+    from workspaces.screen.knowledge_base.sources import (
+        fetch_info, reset_breakers, SEARCH_DELAY, extract_year, last_miss_reason,
+    )
 
     clear_log()
     set_running("更新知识库")
@@ -263,11 +280,16 @@ async def _run_update(config_mgr, profile, db, render_cb):
         if profile != "tv" and kb_lookup(q, profile=profile):
             skipped += 1
             continue
+        miss = ""
         try:
             info = await asyncio.to_thread(fetch_info, q, tmdb_key, "all", extract_year(name), profile, tvdb_key)
         except Exception as e:
             logger.warning("取信息失败 %s: %s", q, e)
             info = None
+            miss = f"异常: {e}"
+        else:
+            if not info:
+                miss = last_miss_reason()
         if info:
             added += 1
             seen.add(q)
@@ -277,7 +299,7 @@ async def _run_update(config_mgr, profile, db, render_cb):
             log(f"  + {q} → {info.get('zh','')}/{info.get('en','')}/{info.get('year','')}{extra}", "green")
         else:
             skipped += 1
-            log(f"  └ 未命中数据源: {q}", "gray")
+            log(f"  └ 未命中数据源: {q}" + (f"（{miss}）" if miss else ""), "gray")
         await asyncio.sleep(SEARCH_DELAY)  # 限流，避免 apizero 429
 
     log(f"◆ 完成：新增 {added} 条，跳过 {skipped} 条", "cyan")

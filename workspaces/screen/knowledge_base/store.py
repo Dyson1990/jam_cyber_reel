@@ -7,6 +7,7 @@
 import hashlib
 import json
 import logging
+import re
 from pathlib import Path
 
 import chromadb
@@ -44,8 +45,32 @@ def _norm(s) -> str:
     return (s or "").strip()
 
 
+def _norm_key(s: str) -> str:
+    """比较用归一化：小写、去标点/空白，仅留字母数字与汉字（容错 ! / ：: / . / _ / 空格 等差异）。"""
+    return re.sub(r"[^\w一-鿿]", "", _norm(s).lower())
+
+
+def _to_info(m: dict) -> dict | None:
+    """metadata → 统一返回体 {zh,en,year,score,seasons,finished,raw?}，无任何字段返回 None。"""
+    out = {k: m[k] for k in ("zh", "en", "year", "score", "seasons", "finished") if m.get(k)}
+    if not out:
+        return None
+    if m.get("raw"):
+        try:
+            out["raw"] = json.loads(m["raw"])
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
 def kb_lookup(query: str, profile: str = "movie") -> dict | None:
-    """按片名查库：命中 title/中文名/英文名 任一即返回 {zh,en,year,score}。"""
+    """按片名查库：命中 title/中文名/英文名 任一即返回 {zh,en,year,score}。
+
+    title 非唯一（同名误配会留下「暗黑→暗黑者」这类多条），故多条命中时按
+    「zh/en 字段与查询词精确一致 > 字段更完整」择优，而非盲取第一条；
+    精确匹配未命中再做一次归一化全库扫描兜底（容错标点/空格差异），
+    避免标点不一致（The Cuphead Show! vs The Cuphead Show）漏查而走网络。
+    """
     q = _norm(query)
     if not q:
         return None
@@ -56,16 +81,31 @@ def kb_lookup(query: str, profile: str = "movie") -> dict | None:
     except Exception:
         logger.warning("知识库查询失败 %s", q, exc_info=True)
         return None
-    if res and res["ids"]:
-        m = res["metadatas"][0]
-        out = {k: m[k] for k in ("zh", "en", "year", "score", "seasons", "finished") if m.get(k)}
-        if m.get("raw"):
-            try:
-                out["raw"] = json.loads(m["raw"])
-            except (TypeError, ValueError):
-                pass
-        return out
-    return None
+    metas = (res or {}).get("metadatas") or []
+    if metas:
+        nk = _norm_key(q)
+
+        def rank(i: int) -> tuple[int, int]:
+            m = metas[i]
+            exact = (_norm_key(m.get("zh", "")) == nk) + (_norm_key(m.get("en", "")) == nk)
+            complete = sum(1 for k in ("zh", "en", "year", "score", "seasons", "finished") if m.get(k))
+            return (exact, complete)
+
+        return _to_info(metas[max(range(len(metas)), key=rank)])
+    try:
+        allres = _get_collection(profile).get()
+    except Exception:
+        return None
+    nk = _norm_key(q)
+    best = best_score = None
+    for m in allres.get("metadatas") or []:
+        fields = [_norm_key(m.get("title", "")), _norm_key(m.get("zh", "")), _norm_key(m.get("en", ""))]
+        if nk not in fields:
+            continue
+        score = 2 if nk in fields[1:] else 1  # zh/en 命中权重高于仅 title 命中
+        if best_score is None or score > best_score:
+            best, best_score = m, score
+    return _to_info(best) if best else None
 
 
 def kb_upsert(zh: str, en: str, year: str, score: str, title: str, raw: dict | None = None, profile: str = "movie", seasons: str = "", finished: str = "") -> None:

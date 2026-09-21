@@ -18,13 +18,15 @@ from pathlib import Path
 
 from nicegui import ui
 
+from core.files import move_to_structure, rollback_structure, scan_videos
 from core.logging_config import get_log_dir, get_logger
 from workspaces._shared import parse_naming_rules
 from workspaces.screen.normalize import (
-    build_prompt, build_fix_prompt, call_deepseek,
+    build_prompt, build_tv_prompt, build_fix_prompt, call_deepseek, tv_summarizable,
 )
 from workspaces.screen.overview import get_deepseek_key
 from workspaces.screen.knowledge_base.sources import fetch_infos
+from workspaces.screen.knowledge_base import kb_lookup
 from workspaces.screen.scan import media_files
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
@@ -167,7 +169,9 @@ def _build_ai_naming(config_mgr, profile, handler, db):
         )
 
     with ui.row().classes("gap-2 items-center w-full mb-3"):
-        ui.label("每次文件名数:").classes("text-xs text-slate-500 font-mono w-24")
+        ui.label("每次季数:" if profile == "tv" else "每次文件名数:").classes(
+            "text-xs text-slate-500 font-mono w-24"
+        )
         ui.number(
             value=cfg.get("ai_batch_size", 20), min=1, max=500, step=1,
         ).props("outlined dense dark").classes("w-24 font-mono text-xs").on_value_change(
@@ -254,38 +258,88 @@ def _save_rules(config_mgr, profile, value):
 # ==================== AI 命名三步 ====================
 
 async def _gen_prompt(config_mgr, profile, db, prompt_area):
-    """生成需求：取数据库中来源为 from 的文件，组装规则+文件名填入提示词框。"""
+    """生成需求：取数据库中来源为 from 的文件（tv=系列文件夹内集文件），组装提示词。"""
     clear_log()
     set_running("生成需求")
-    files = [
-        f for f in await asyncio.to_thread(media_files, db, profile, "from")
-        if f.exists()
+    rows = [
+        r for r in await asyncio.to_thread(db.get_media_by_profile, profile)
+        if r["source"] == "from" and Path(r["mv_path"]).exists()
     ]
+    files = [Path(r["mv_path"]) for r in rows]
     if not files:
         log("  数据库中无来源为 from 的文件（请先到「扫描」同步）", "yellow")
         set_ready()
         return
-    limit = config_mgr.get_profile_config(profile).get("ai_batch_size", 20)
-    names = [f.name for f in files]
-    batch = names[:limit] if limit else names
-    infos = {}
-    if config_mgr.get_profile_config(profile).get("ai_douban", False):
-        infos = await asyncio.to_thread(
-            fetch_infos, batch,
-            config_mgr.get_profile_config(profile).get("tmdb_api_key", ""),
-            profile,
-            config_mgr.get_profile_config(profile).get("tvdb_api_key", ""),
-        )
-    prompt = build_prompt(names, limit=limit, infos=infos, is_tv=profile == "tv")
+    cfg = config_mgr.get_profile_config(profile)
+    tmdb_key = cfg.get("tmdb_api_key", "")
+    tvdb_key = cfg.get("tvdb_api_key", "")
+    if profile == "tv":
+        # 电视剧：以季（系列文件夹）为单位分批，中英文名/逐季年份优先复用知识库
+        limit = cfg.get("ai_batch_size", 20) or 0
+        episodes: list[str] = []
+        series: dict[str, Path] = {}  # folder.name → Path，空文件夹（已处理完）直接跳过
+        for folder in files:
+            vfs = await asyncio.to_thread(scan_videos, folder)
+            if not vfs:
+                continue  # 已处理完/空文件夹：不占「每次季数」名额，也不进「查询结果」
+            series[folder.name] = folder
+            for vf in vfs:
+                episodes.append(f"{folder.name}/{vf.name}")
+        if not episodes:
+            log("  各系列文件夹内无视频文件", "yellow")
+            set_ready()
+            return
+        # 「每次季数」按「待标准化集文件」里实际列出的系列计：无法总结的先剔除，不占名额
+        order, unsum = tv_summarizable(episodes)
+        for name in unsum:
+            log(f"  ⚠ 「{name}」各集名称差距过大无法总结，已跳过（请手动处理）", "yellow")
+        keep = order[:limit] if limit else order
+        keep_set = set(keep)
+        episodes = [ep for ep in episodes if ep.partition("/")[0] in keep_set]
+        # 知识库优先：media 表已固化 AI 提取的中英文名，命中 chromadb 直接复用，缺失才走网络
+        clean = {
+            Path(r["mv_path"]): (r["zh"] or "").strip() or (r["en"] or "").strip()
+            for r in rows
+        }
+        infos: dict[str, dict] = {}
+        miss: list[str] = []
+        for name in keep:
+            q = clean.get(series[name])
+            hit = kb_lookup(q, profile="tv") if q else None
+            if hit:
+                infos[name] = hit
+            else:
+                miss.append(name)
+        if miss:
+            net = await asyncio.to_thread(fetch_infos, miss, tmdb_key, profile, tvdb_key)
+            infos.update(net)
+        prompt, _ = build_tv_prompt(episodes, infos)
+        if not prompt:
+            log("  本批集文件全部无法总结，未生成提示词", "red")
+            set_ready()
+            return
+        msg = f"  已生成提示词：共 {len(episodes)} 个集文件，{len(keep)} 个季"
+        if infos:
+            msg += f"，命中 {len(infos)} 个系列"
+    else:
+        limit = cfg.get("ai_batch_size", 20)
+        names = [f.name for f in files]
+        batch = names[:limit] if limit else names
+        infos = {}
+        if cfg.get("ai_douban", False):
+            infos = await asyncio.to_thread(
+                fetch_infos, batch, tmdb_key, profile, tvdb_key,
+            )
+        prompt = build_prompt(batch, limit=limit, infos=infos, is_tv=False)
+        msg = f"  已生成提示词：共 {len(names)} 个文件，取前 {len(batch)} 个"
+        if infos:
+            msg += f"，命中 {len(infos)} 条"
     if not prompt_area.is_deleted:
         prompt_area.set_value(prompt)
     config_mgr.update_profile_config(profile, "ai_prompt", prompt)
     config_mgr.update_profile_config(
         profile, "ai_prompt_updated", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     )
-    msg = f"  已生成提示词：共 {len(names)} 个文件，取前 {len(batch)} 个"
-    if infos:
-        msg += f"，命中 {len(infos)} 条"
     log(msg, "cyan")
     set_ready()
 
@@ -314,7 +368,7 @@ async def _preview(config_mgr, profile, prompt_area, result_state, result_contai
         return
     result_state["result"] = result
     _save_mapping(result)
-    _render_result_table(result_container, result)
+    _render_result_table(result_container, result, profile)
     if errors:
         log(f"  跳过 {len(errors)} 条（必填槽位缺失）:", "yellow")
         for e in errors:
@@ -351,7 +405,12 @@ async def _apply(config_mgr, profile, handler, result_state):
         set_ready()
         return
     try:
-        records = await asyncio.to_thread(handler.rename, mapping, target_dir=to_dir)
+        if profile == "tv":
+            records = await asyncio.to_thread(
+                move_to_structure, mapping, to_dir, from_dir, handler.db, profile,
+            )
+        else:
+            records = await asyncio.to_thread(handler.rename, mapping, target_dir=to_dir)
     except Exception as e:
         logger.exception("AI 重命名失败 profile=%s", profile)
         log(f"  重命名失败: {e}", "red")
@@ -386,14 +445,17 @@ def _save_mapping(result: dict[str, str]) -> None:
     log(f"  映射已保存: logs/screen/{path.name}", "gray")
 
 
-def _render_result_table(container, result):
-    """在容器内渲染映射表格：原文件名 → 新文件名。"""
+def _render_result_table(container, result, profile="movie"):
+    """在容器内渲染映射表格：原文件名 → 新文件名（电视剧三级路径按 / 拆行展示）。"""
     if container.is_deleted:
         return
     container.clear()
     with container:
         if not result:
             ui.label("(无结果)").classes("text-xs text-slate-500 font-mono")
+            return
+        if profile == "tv":
+            _render_tv_mapping(container, result)
             return
         rows = [{"old": k, "new": v} for k, v in result.items()]
         ui.table(
@@ -403,6 +465,21 @@ def _render_result_table(container, result):
             ],
             rows=rows,
         ).classes("w-full")
+
+
+def _render_tv_mapping(container, result):
+    """电视剧映射表：old=系列/集、new=系列/季/集 均较长，逐段换行显示，避免单行溢出。"""
+    with ui.row().classes("gap-2 items-center w-full text-xs text-slate-400 font-mono mb-1"):
+        ui.label("原相对路径").classes("flex-1")
+        ui.label("新相对路径").classes("flex-1")
+    for old, new in result.items():
+        with ui.row().classes("gap-2 items-start w-full border-b border-slate-800 py-1"):
+            with ui.column().classes("flex-1 min-w-0 gap-0"):
+                for seg in old.split("/"):
+                    ui.label(seg).classes("text-xs font-mono text-slate-300 break-all")
+            with ui.column().classes("flex-1 min-w-0 gap-0"):
+                for seg in new.split("/"):
+                    ui.label(seg).classes("text-xs font-mono text-cyan-300 break-all")
 
 
 # ==================== AI 修正三步 ====================
@@ -648,9 +725,15 @@ async def _run_rollback_batch(handler, source_key="from"):
 
     source_dir = _get_source_dir(handler, source_key)
     try:
-        results = await asyncio.to_thread(
-            handler.rollback_last_batch, source_dir=source_dir,
-        )
+        if handler.profile_name == "tv" and source_dir:
+            records = handler.db.get_last_batch(handler.profile_name)
+            results = await asyncio.to_thread(
+                rollback_structure, records, handler.db, source_dir,
+            )
+        else:
+            results = await asyncio.to_thread(
+                handler.rollback_last_batch, source_dir=source_dir,
+            )
         _log_batch_results(results)
     except Exception as e:
         logger.exception("回滚上一批失败 profile=%s", handler.profile_name)
@@ -679,9 +762,15 @@ async def _run_rollback_range(handler, date_from, date_to, source_key="from"):
 
     source_dir = _get_source_dir(handler, source_key)
     try:
-        results = await asyncio.to_thread(
-            handler.rollback_date_range, sd, ed, source_dir=source_dir,
-        )
+        if handler.profile_name == "tv" and source_dir:
+            records = handler.db.get_rename_by_date_range(handler.profile_name, sd, ed)
+            results = await asyncio.to_thread(
+                rollback_structure, records, handler.db, source_dir,
+            )
+        else:
+            results = await asyncio.to_thread(
+                handler.rollback_date_range, sd, ed, source_dir=source_dir,
+            )
         _log_batch_results(results)
     except Exception as e:
         logger.exception("批量回滚失败 profile=%s", handler.profile_name)
