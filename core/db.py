@@ -381,6 +381,11 @@ class Database:
         )
         self.execute(sql, tuple(values))
 
+    def delete_media(self, profile: str, mv_path: str) -> None:
+        """删除指定路径的媒体记录（重命名/搬移后清理悬空旧路径）。"""
+        table = f"media_{profile}"
+        self.execute(f"DELETE FROM {table} WHERE mv_path=?", (mv_path,))
+
     def get_media_by_profile(self, profile: str) -> list[sqlite3.Row]:
         """获取指定 Profile 的全部媒体记录。
 

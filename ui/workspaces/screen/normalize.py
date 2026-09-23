@@ -27,7 +27,7 @@ from workspaces.screen.normalize import (
 from workspaces.screen.overview import get_deepseek_key
 from workspaces.screen.knowledge_base.sources import fetch_infos
 from workspaces.screen.knowledge_base import kb_lookup
-from workspaces.screen.scan import media_files
+from workspaces.screen.scan import media_files, resync_db
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
     log, clear_log, set_running, set_ready, set_error,
@@ -284,7 +284,9 @@ async def _gen_prompt(config_mgr, profile, db, prompt_area):
                 continue  # 已处理完/空文件夹：不占「每次季数」名额，也不进「查询结果」
             series[folder.name] = folder
             for vf in vfs:
-                episodes.append(f"{folder.name}/{vf.name}")
+                # 保留系列文件夹内的相对子路径（可能已有季子目录），否则 vf.name
+                # 会丢掉季目录、生成扁平 old 路径，应用映射时找不到源文件（WinError 2）
+                episodes.append(f"{folder.name}/{vf.relative_to(folder).as_posix()}")
         if not episodes:
             log("  各系列文件夹内无视频文件", "yellow")
             set_ready()
@@ -429,6 +431,12 @@ async def _apply(config_mgr, profile, handler, result_state):
                 f"{r.get('status')}",
                 "red",
             )
+    try:
+        net = await asyncio.to_thread(resync_db, cfg, handler.db, profile)
+        log(f"  db 同步: 新增-删除净变化 {net:+d}", "gray")
+    except Exception as e:
+        logger.exception("重命名后同步 media 表失败")
+        log(f"  db 同步失败: {e}", "yellow")
     update_drawer_info()
     set_ready()
 

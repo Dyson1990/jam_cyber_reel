@@ -10,8 +10,11 @@ screen 三模块（扫描 / 标准化 / 截图）共享 UI 工具。
 页面切换时 content_area.clear() 会销毁旧面板，新页面重建后重新绑定。
 """
 
+from datetime import datetime
+
 from nicegui import ui
 
+from core.logging_config import get_log_dir
 from workspaces import WORKSPACES, workspace_of
 from ui.state import update_drawer_info, switch_page, clear_cancel, tag
 
@@ -22,7 +25,7 @@ _log_scroll_nicegui_id: int = 0
 
 
 def log(msg: str, color: str = "gray"):
-    """向右侧共享日志区追加一条带颜色的日志。"""
+    """向右侧共享日志区追加一条带颜色的日志，并同步落盘 logs/screen/log-panel.log。"""
     if _log_container is None:
         return
     color_cls = {
@@ -34,6 +37,19 @@ def log(msg: str, color: str = "gray"):
     }.get(color, "text-slate-400")
     with _log_container:
         ui.label(msg).classes(f"font-mono text-xs {color_cls}")
+    _persist_log(msg)
+
+
+def _persist_log(msg: str) -> None:
+    """业务日志落盘：UI 日志面板是瞬时的，落盘供离线排查/回看。"""
+    log_dir = get_log_dir()
+    if not log_dir:
+        return
+    screen_dir = log_dir / "screen"
+    screen_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(screen_dir / "log-panel.log", "a", encoding="utf-8") as f:
+        f.write(f"{ts} | {msg}\n")
 
 
 def clear_log():

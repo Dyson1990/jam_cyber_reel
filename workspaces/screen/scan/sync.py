@@ -109,6 +109,22 @@ def sync_db(cfg: dict, db, profile: str, added: list | None = None) -> int:
     return count
 
 
+def resync_db(cfg: dict, db, profile: str) -> int:
+    """重命名/搬移后重同步 media 表：写入新增、删除悬空，返回净变化数。
+
+    与 sync_db 不同，这里同时清理磁盘已不存在的旧记录——重命名会搬走 from 下
+    旧文件、在 to 下产生新文件，单靠 sync_db（只增不删）会残留悬空路径。
+    """
+    diff = diff_db(cfg, db, profile)
+    added = sync_db(cfg, db, profile, diff["added"])
+    removed = 0
+    for p in diff["removed"]:
+        db.delete_media(profile, p)
+        removed += 1
+    logger.info("resync_db profile=%s 新增=%d 删除=%d", profile, added, removed)
+    return added - removed
+
+
 def media_files(db, profile: str, source: str | None = None) -> list[Path]:
     """从 media 表取文件路径；source 指定时只取该来源（from/to/root）。"""
     rows = db.get_media_by_profile(profile)
