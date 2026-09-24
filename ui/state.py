@@ -115,6 +115,13 @@ registry = None
 # 第③段专用选项菜单容器（layout.py 中赋值，随 workspace 切换重建）
 workspace_menu_container: ui.column = None
 
+# ===== 会话级业务状态（单一数据源）=====
+# 页面销毁重建（switch_page 的 clear+rebuild）只丢视图，不丢这些数据；
+# 后台任务只写这里，视图从这里渲染。这就是「状态与视图解耦」的落点。
+log_lines: dict[str, list[tuple[str, str]]] = {}  # screen 各页日志：page -> [(消息, 颜色)]，互不干扰
+task: dict = {"key": "", "name": "", "status": "idle"}  # 当前任务：key=按钮标识, status∈idle/running/ready/error
+page: dict = {}                                # 各页瞬态数据，如 page["normalize"]["ai"]={"result":{...},"selected":{...}}
+
 
 def switch_page(page: str):
     """切换右侧内容区页面。"""

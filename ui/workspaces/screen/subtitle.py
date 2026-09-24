@@ -11,13 +11,33 @@ from workspaces.screen.subtitle import (
     is_no_subtitle, search_keyword, search_subs, download_subs, SAVE_DIR,
     scan_pairs, subtitle_kind, mux_subtitle,
 )
+import ui.state as state
 from ui.state import tag
 from ui.workspaces.screen._shared import (
-    log, clear_log, set_running, set_ready, set_error,
-    run_button, build_profile_radio, build_log_panel, mask_key,
+    set_running, set_ready, set_error,
+    run_button, build_profile_radio, build_log_panel, mask_key, make_page_logger,
 )
 
+log, clear_log = make_page_logger("sub_download")
+
 logger = get_logger(__name__)
+
+
+@ui.refreshable
+def subtitle_table():
+    """从 store 渲染「对应表」（视频↔字幕匹配）。数据在 state.page["subtitle"]，切页不丢。"""
+    rows = state.page.get("subtitle", {}).get("rows", [])
+    if not rows:
+        ui.label("无匹配").classes("text-slate-500 font-mono text-sm")
+        return
+    ui.table(
+        columns=[
+            {"name": "video", "label": "视频", "field": "video", "align": "left"},
+            {"name": "sub", "label": "字幕", "field": "sub", "align": "left"},
+            {"name": "kind", "label": "类型", "field": "kind", "align": "left"},
+        ],
+        rows=rows,
+    ).classes("w-full")
 
 
 def build_subtitle(config_mgr, db, registry):
@@ -69,13 +89,13 @@ def build_subtitle(config_mgr, db, registry):
                 with ui.row().classes("gap-3"):
                     run_button(
                         "▶ 对应表", "cyan",
-                        lambda: _gen_table(mux_path, table_container),
+                        lambda: _gen_table(mux_path),
                     )
                     run_button("▶ 封装", "cyan", lambda: _mux(mux_path))
 
-            table_container = ui.column().classes("w-full")
+            subtitle_table()
 
-        build_log_panel()
+        build_log_panel("sub_download")
 
 
 def _save_token(config_mgr, profile, value, token_input):
@@ -157,7 +177,7 @@ async def _scan(path_input):
     return await asyncio.to_thread(scan_pairs, path)
 
 
-async def _gen_table(path_input, table_container):
+async def _gen_table(path_input):
     """对应表：列出目录内视频↔字幕匹配及检测到的字幕类型。"""
     global _last_scan, _last_path
     clear_log()
@@ -183,19 +203,8 @@ async def _gen_table(path_input, table_container):
         f"未配视频 {len(res['orphans_video'])}",
         "cyan",
     )
-    table_container.clear()
-    with table_container:
-        if not rows:
-            ui.label("无匹配").classes("text-slate-500 font-mono text-sm")
-        else:
-            ui.table(
-                columns=[
-                    {"name": "video", "label": "视频", "field": "video", "align": "left"},
-                    {"name": "sub", "label": "字幕", "field": "sub", "align": "left"},
-                    {"name": "kind", "label": "类型", "field": "kind", "align": "left"},
-                ],
-                rows=rows,
-            ).classes("w-full")
+    state.page["subtitle"] = {"rows": rows}
+    subtitle_table.refresh()
     set_ready()
 
 

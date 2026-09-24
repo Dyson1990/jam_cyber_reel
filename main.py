@@ -39,6 +39,16 @@ body::after {
     transparent 0, transparent 3px, rgba(0, 0, 0, .03) 3px, rgba(0, 0, 0, .03) 4px);
 }
 .glow-text { text-shadow: 0 0 8px rgba(0, 240, 255, .7), 0 0 22px rgba(0, 240, 255, .35); }
+/* 抽屉分段标题：霓虹紫呼吸，与青色主色区分、提升辨识度 */
+.section-title {
+  color: #e9d5ff;
+  text-shadow: 0 0 4px #c084fc, 0 0 10px #a855f7, 0 0 20px #9333ea;
+  animation: section-breathe 3s ease-in-out infinite;
+}
+@keyframes section-breathe {
+  0%, 100% { opacity: 1; text-shadow: 0 0 4px #c084fc, 0 0 10px #a855f7, 0 0 20px #9333ea; }
+  50% { opacity: .5; text-shadow: 0 0 2px #c084fc, 0 0 6px #a855f7, 0 0 12px #9333ea; }
+}
 /* 霓虹灯招牌：白热灯芯 + 多层青色光晕 + 偶发微闪 */
 .neon-title {
   color: #e0fbff;

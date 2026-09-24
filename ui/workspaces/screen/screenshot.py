@@ -20,9 +20,11 @@ from core.logging_config import get_logger
 from workspaces.screen.screenshot import capture_one_video
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
-    log, clear_log, set_running, set_ready, set_error,
-    run_button, build_profile_radio, build_log_panel,
+    set_running, set_ready, set_error,
+    run_button, build_profile_radio, build_log_panel, make_page_logger,
 )
+
+log, clear_log = make_page_logger("screenshot")
 
 logger = get_logger(__name__)
 
@@ -90,7 +92,7 @@ def build_screenshot(config_mgr, db, registry):
                     "▶ 截取截图", "cyan", lambda: _run_capture_screenshots(handler),
                 )
 
-        build_log_panel()
+        build_log_panel("screenshot")
 
 
 def _save_root(config_mgr, profile, value):

@@ -28,11 +28,14 @@ from workspaces.screen.overview import get_deepseek_key
 from workspaces.screen.knowledge_base.sources import fetch_infos
 from workspaces.screen.knowledge_base import kb_lookup
 from workspaces.screen.scan import media_files, resync_db
+import ui.state as state
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
-    log, clear_log, set_running, set_ready, set_error,
-    run_button, build_profile_radio, build_log_panel, mask_key, save_tmdb_key,
+    set_running, set_ready, set_error,
+    run_button, build_profile_radio, build_log_panel, mask_key, save_tmdb_key, make_page_logger,
 )
+
+log, clear_log = make_page_logger("normalize")
 
 logger = get_logger(__name__)
 
@@ -88,7 +91,7 @@ def build_normalize(config_mgr, db, registry):
 
                 _render()
 
-        build_log_panel()
+        build_log_panel("normalize")
 
 
 def _on_method_change(config_mgr, profile, value, render):
@@ -204,16 +207,14 @@ def _build_ai_naming(config_mgr, profile, handler, db):
         ),
     )
 
-    result_state = {"result": {}}
-
     with ui.row().classes("gap-3 mt-4"):
-        run_button("生成需求", "cyan", lambda: _gen_prompt(config_mgr, profile, db, prompt_area))
-        run_button("预览改动", "cyan", lambda: _preview(config_mgr, profile, prompt_area, result_state, result_container))
-        run_button("应用映射", "cyan", lambda: _apply(config_mgr, profile, handler, result_state))
+        run_button("生成需求", "cyan", lambda: _gen_prompt(config_mgr, profile, db, prompt_area), key="gen_ai")
+        run_button("预览改动", "cyan", lambda: _preview(config_mgr, profile, prompt_area, "ai"), key="preview_ai")
+        run_button("应用映射", "cyan", lambda: _apply(config_mgr, profile, handler, "ai"), key="apply_ai")
 
     _build_rollback_row(handler)
 
-    result_container = ui.column().classes("w-full mt-4")
+    _result_view(profile, "ai")
 
 
 def _build_ai_fix(config_mgr, profile, handler, db):
@@ -235,16 +236,14 @@ def _build_ai_fix(config_mgr, profile, handler, db):
         lambda e: config_mgr.update_profile_config(profile, "ai_prompt", e.value or ""),
     )
 
-    result_state = {"result": {}, "selected": {}}
-
     with ui.row().classes("gap-3 mt-4"):
-        run_button("生成需求", "cyan", lambda: _gen_fix_prompt(config_mgr, profile, db, prompt_area))
-        run_button("预览改动", "cyan", lambda: _preview_fix(config_mgr, profile, prompt_area, result_state, result_container))
-        run_button("应用映射", "cyan", lambda: _apply_fix(config_mgr, profile, handler, result_state))
+        run_button("生成需求", "cyan", lambda: _gen_fix_prompt(config_mgr, profile, db, prompt_area), key="gen_fix")
+        run_button("预览改动", "cyan", lambda: _preview_fix(config_mgr, profile, prompt_area, "ai_fix"), key="preview_fix")
+        run_button("应用映射", "cyan", lambda: _apply_fix(config_mgr, profile, handler, "ai_fix"), key="apply_fix")
 
     _build_rollback_row(handler, source_key="root")
 
-    result_container = ui.column().classes("w-full mt-4")
+    _result_view(profile, "ai_fix")
 
 
 def _save_rules(config_mgr, profile, value):
@@ -346,7 +345,7 @@ async def _gen_prompt(config_mgr, profile, db, prompt_area):
     set_ready()
 
 
-async def _preview(config_mgr, profile, prompt_area, result_state, result_container):
+async def _preview(config_mgr, profile, prompt_area, mode):
     """预览改动：提交提示词框内容（人工修改后）给 deepseek，表格展示映射。"""
     key = get_deepseek_key(config_mgr)
     prompt = (prompt_area.value or "").strip()
@@ -368,9 +367,9 @@ async def _preview(config_mgr, profile, prompt_area, result_state, result_contai
         log(f"  调用失败: {e}", "red")
         set_error()
         return
-    result_state["result"] = result
+    _data(mode)["result"] = result
     _save_mapping(result)
-    _render_result_table(result_container, result, profile)
+    _result_view.refresh(profile, mode)
     if errors:
         log(f"  跳过 {len(errors)} 条（必填槽位缺失）:", "yellow")
         for e in errors:
@@ -379,11 +378,11 @@ async def _preview(config_mgr, profile, prompt_area, result_state, result_contai
     set_ready()
 
 
-async def _apply(config_mgr, profile, handler, result_state):
+async def _apply(config_mgr, profile, handler, mode):
     """应用映射：按预览结果重命名（从 from 移动到 to）。"""
     clear_log()
     set_running("应用映射")
-    result = result_state.get("result", {})
+    result = _data(mode).get("result", {})
     if not result:
         log("  尚无预览结果，请先点「预览改动」", "red")
         set_error()
@@ -453,29 +452,42 @@ def _save_mapping(result: dict[str, str]) -> None:
     log(f"  映射已保存: logs/screen/{path.name}", "gray")
 
 
-def _render_result_table(container, result, profile="movie"):
-    """在容器内渲染映射表格：原文件名 → 新文件名（电视剧三级路径按 / 拆行展示）。"""
-    if container.is_deleted:
+def _data(mode: str) -> dict:
+    """normalize 页某模式的瞬态数据（单一数据源，跨页面存活）。"""
+    return state.page.setdefault("normalize", {}).setdefault(mode, {"result": {}, "selected": {}})
+
+
+@ui.refreshable
+def _result_view(profile: str, mode: str):
+    """从 store 渲染映射结果表。任务写 store 后调 _result_view.refresh() 重绘；
+    页面销毁重建时重新实例化即恢复历史结果（refreshable 自动 prune 已删 target）。"""
+    data = _data(mode)
+    result = data.get("result", {})
+    if mode == "ai_fix":
+        _render_fix_table(result, data.get("selected", {}))
+    else:
+        _render_result_table(result, profile)
+
+
+def _render_result_table(result, profile="movie"):
+    """渲染映射表格：原文件名 → 新文件名（电视剧三级路径按 / 拆行展示）。"""
+    if not result:
+        ui.label("(无结果)").classes("text-xs text-slate-500 font-mono")
         return
-    container.clear()
-    with container:
-        if not result:
-            ui.label("(无结果)").classes("text-xs text-slate-500 font-mono")
-            return
-        if profile == "tv":
-            _render_tv_mapping(container, result)
-            return
-        rows = [{"old": k, "new": v} for k, v in result.items()]
-        ui.table(
-            columns=[
-                {"name": "old", "label": "原文件名", "field": "old", "align": "left"},
-                {"name": "new", "label": "新文件名", "field": "new", "align": "left"},
-            ],
-            rows=rows,
-        ).classes("w-full")
+    if profile == "tv":
+        _render_tv_mapping(result)
+        return
+    rows = [{"old": k, "new": v} for k, v in result.items()]
+    ui.table(
+        columns=[
+            {"name": "old", "label": "原文件名", "field": "old", "align": "left"},
+            {"name": "new", "label": "新文件名", "field": "new", "align": "left"},
+        ],
+        rows=rows,
+    ).classes("w-full")
 
 
-def _render_tv_mapping(container, result):
+def _render_tv_mapping(result):
     """电视剧映射表：old=系列/集、new=系列/季/集 均较长，逐段换行显示，避免单行溢出。"""
     with ui.row().classes("gap-2 items-center w-full text-xs text-slate-400 font-mono mb-1"):
         ui.label("原相对路径").classes("flex-1")
@@ -525,7 +537,7 @@ async def _gen_fix_prompt(config_mgr, profile, db, prompt_area):
     set_ready()
 
 
-async def _preview_fix(config_mgr, profile, prompt_area, result_state, result_container):
+async def _preview_fix(config_mgr, profile, prompt_area, mode):
     """预览修正：提交提示词给 deepseek，表格展示（含勾选框）。"""
     key = get_deepseek_key(config_mgr)
     prompt = (prompt_area.value or "").strip()
@@ -547,10 +559,10 @@ async def _preview_fix(config_mgr, profile, prompt_area, result_state, result_co
         log(f"  调用失败: {e}", "red")
         set_error()
         return
-    result_state["result"] = result
-    result_state["selected"] = {k: True for k in result}
+    _data(mode)["result"] = result
+    _data(mode)["selected"] = {k: True for k in result}
     _save_mapping(result)
-    _render_fix_table(result_container, result, result_state["selected"])
+    _result_view.refresh(profile, mode)
     if errors:
         log(f"  跳过 {len(errors)} 条（必填槽位缺失）:", "yellow")
         for e in errors:
@@ -559,12 +571,12 @@ async def _preview_fix(config_mgr, profile, prompt_area, result_state, result_co
     set_ready()
 
 
-async def _apply_fix(config_mgr, profile, handler, result_state):
+async def _apply_fix(config_mgr, profile, handler, mode):
     """应用修正：仅重命名勾选的条目（原地改名，root 目录内）。"""
     clear_log()
     set_running("应用修正")
-    result = result_state.get("result", {})
-    selected = result_state.get("selected", {})
+    result = _data(mode).get("result", {})
+    selected = _data(mode).get("selected", {})
     if not result:
         log("  尚无预览结果，请先点「预览改动」", "red")
         set_error()
@@ -601,28 +613,24 @@ async def _apply_fix(config_mgr, profile, handler, result_state):
     set_ready()
 
 
-def _render_fix_table(container, result, selected):
+def _render_fix_table(result, selected):
     """渲染修正映射表格：勾选框 + 原文件名 → 新文件名。"""
-    if container.is_deleted:
+    if not result:
+        ui.label("(无结果)").classes("text-xs text-slate-500 font-mono")
         return
-    container.clear()
-    with container:
-        if not result:
-            ui.label("(无结果)").classes("text-xs text-slate-500 font-mono")
-            return
-        with ui.row().classes("gap-2 items-center w-full text-xs text-slate-400 font-mono mb-1"):
-            ui.label("勾选").classes("w-10")
-            ui.label("原文件名").classes("flex-1")
-            ui.label("新文件名").classes("flex-1")
-        for old, new in result.items():
-            def _toggle(e, k=old):
-                selected[k] = bool(e.value)
-            with ui.row().classes("gap-2 items-center w-full"):
-                ui.checkbox(value=selected.get(old, True)).props(
-                    "dense color=cyan"
-                ).on_value_change(_toggle)
-                ui.label(old).classes("flex-1 text-xs font-mono text-slate-300")
-                ui.label(new).classes("flex-1 text-xs font-mono text-cyan-300")
+    with ui.row().classes("gap-2 items-center w-full text-xs text-slate-400 font-mono mb-1"):
+        ui.label("勾选").classes("w-10")
+        ui.label("原文件名").classes("flex-1")
+        ui.label("新文件名").classes("flex-1")
+    for old, new in result.items():
+        def _toggle(e, k=old):
+            selected[k] = bool(e.value)
+        with ui.row().classes("gap-2 items-center w-full"):
+            ui.checkbox(value=selected.get(old, True)).props(
+                "dense color=cyan"
+            ).on_value_change(_toggle)
+            ui.label(old).classes("flex-1 text-xs font-mono text-slate-300")
+            ui.label(new).classes("flex-1 text-xs font-mono text-cyan-300")
 
 
 # ==================== 文件名更新逻辑 ====================

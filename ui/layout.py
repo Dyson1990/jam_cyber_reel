@@ -30,7 +30,7 @@ def create_layout(cfg_mgr, db, prof_registry):
         with ui.column().classes("p-4 w-full gap-2"):
             # ① CURRENT PROFILE
             state.tag("drawer-profile")
-            ui.label("CURRENT PROFILE").classes("text-xs text-slate-500 font-mono")
+            ui.label("CURRENT PROFILE").classes("text-xs section-title font-mono")
             state.workspace_radio = ui.radio(
                 {key: ws["label"] for key, ws in WORKSPACES.items()},
                 value=workspace_of(cfg_mgr.current_profile),
@@ -46,7 +46,7 @@ def create_layout(cfg_mgr, db, prof_registry):
 
             # ② 常用选项
             state.tag("drawer-common")
-            ui.label("COMMON").classes("text-xs text-slate-600 font-mono")
+            ui.label("COMMON").classes("text-xs section-title font-mono")
             for icon, label, page in [
                 ("◇", "首页", "home"),
                 ("▤", "媒体浏览器", "browser"),
@@ -58,7 +58,7 @@ def create_layout(cfg_mgr, db, prof_registry):
 
             # ③ 专用选项（随业务域变化）
             state.tag("drawer-specialized")
-            ui.label("SPECIALIZED").classes("text-xs text-slate-600 font-mono")
+            ui.label("SPECIALIZED").classes("text-xs section-title font-mono")
             state.workspace_menu_container = ui.column().classes("w-full gap-2")
             state.render_workspace_menu()
 
@@ -67,7 +67,7 @@ def create_layout(cfg_mgr, db, prof_registry):
             # ④ 状态栏
             with ui.card().classes("bg-slate-800 border border-cyan-900 rounded p-2 w-full"):
                 state.tag("drawer-status")
-                ui.label("STATUS").classes("text-xs text-slate-500 font-mono")
+                ui.label("STATUS").classes("text-xs section-title font-mono")
                 state.status_text = ui.label("就绪").classes(
                     "text-xs text-cyan-300 font-mono mt-1"
                 )

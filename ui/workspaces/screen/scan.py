@@ -18,9 +18,11 @@ from core.logging_config import get_logger
 from workspaces.screen.scan import diff_db, sync_db
 from ui.state import tag, update_drawer_info, cancel_requested
 from ui.workspaces.screen._shared import (
-    log, clear_log, set_running, set_ready, set_error,
-    run_button, build_profile_radio, build_log_panel,
+    set_running, set_ready, set_error,
+    run_button, build_profile_radio, build_log_panel, make_page_logger,
 )
+
+log, clear_log = make_page_logger("scan")
 
 logger = get_logger(__name__)
 
@@ -59,7 +61,7 @@ def build_scan(config_mgr, db, registry):
                     run_button("▶ 对比差异", "cyan", lambda: _run_db_diff(config_mgr, profile, db))
                     run_button("▶ 数据库同步", "cyan", lambda: _run_db_sync(config_mgr, profile, db))
 
-        build_log_panel()
+        build_log_panel("scan")
 
 
 def _path_row(config_mgr, profile, key, value):
