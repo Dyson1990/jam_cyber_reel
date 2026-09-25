@@ -23,6 +23,7 @@ from core.logging_config import get_log_dir, get_logger
 from workspaces._shared import parse_naming_rules
 from workspaces.screen.normalize import (
     build_prompt, build_tv_prompt, build_fix_prompt, call_deepseek, tv_summarizable,
+    assemble, assemble_fix,
 )
 from workspaces.screen.overview import get_deepseek_key
 from workspaces.screen.knowledge_base.sources import fetch_infos
@@ -367,6 +368,14 @@ async def _preview(config_mgr, profile, prompt_area, mode):
         log(f"  调用失败: {e}", "red")
         set_error()
         return
+    from_dir = Path(config_mgr.get_profile_config(profile).get("from", "") or ".")
+    try:
+        result, missing = await asyncio.to_thread(assemble, result, from_dir, profile)
+    except Exception as e:
+        logger.exception("拼装失败（media_probe 未读到流数据）")
+        log(f"  拼装失败: {e}", "red")
+        set_error()
+        return
     _data(mode)["result"] = result
     _save_mapping(result)
     _result_view.refresh(profile, mode)
@@ -374,6 +383,10 @@ async def _preview(config_mgr, profile, prompt_area, mode):
         log(f"  跳过 {len(errors)} 条（必填槽位缺失）:", "yellow")
         for e in errors:
             log(f"    └ {e.get('file','?')}: {e.get('reason','?')}", "yellow")
+    if missing:
+        log(f"  跳过 {len(missing)} 条（源文件未找到，key 与磁盘路径不符）:", "yellow")
+        for m in missing:
+            log(f"    └ {m}", "yellow")
     log(f"  返回 {len(result)} 条映射，已显示表格", "green")
     set_ready()
 
@@ -559,6 +572,7 @@ async def _preview_fix(config_mgr, profile, prompt_area, mode):
         log(f"  调用失败: {e}", "red")
         set_error()
         return
+    result = assemble_fix(result, profile)
     _data(mode)["result"] = result
     _data(mode)["selected"] = {k: True for k in result}
     _save_mapping(result)

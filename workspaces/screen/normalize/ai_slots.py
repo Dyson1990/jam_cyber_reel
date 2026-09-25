@@ -1,10 +1,8 @@
-"""screen AI 命名后端 — 基于 LangChain 的 RAG 流程。
+"""screen AI 槽位补全 — 文本槽位提取（LLM）。
 
-思路：
-    1. 知识库：标准化规则手写为若干条「自包含、原子化」的 RAG 分块（RULES）。
-    2. 索引：各分块经本地哈希嵌入 → 内存向量库（惰性构建）。
-    3. 检索：以待标准化文件名作 query，按相似度召回相关规则块并还原顺序。
-    4. 生成：ChatDeepSeek 以「召回规则 + 文件名 + 输出约束」生成映射。
+AI 只补全需要「理解文件名文本」的槽位（中文名/英文名/年份/版本信息/片源/字幕，
+电视剧再加季集号/副标题），输出 JSON 槽位；全名拼装见 naming.py——技术槽位（分辨率…音轨数）
+由 media_probe（PyAV）读取、扩展名取原文件，由 naming.assemble() 拼装，不再问 AI。
 """
 
 import hashlib
@@ -22,61 +20,44 @@ EMBED_DIM = 256
 
 logger = logging.getLogger(__name__)
 
-# 规则知识库：每条自包含，便于单独检索与灵活增删（总结自旧版AI总结.md）
-# 规则知识库：一条「标准格式」模板固定槽位顺序，其余规则只描述各槽位的
-# 来源（原文件名/查询补充）与可空性，避免「紧接某某之后」这类依赖他字段是否存在的描述。
+# 规则知识库：一条「标准格式」固定槽位顺序，其余规则只描述各文本槽位的来源与可空性。
+# 技术槽位（分辨率…音轨数/字幕兜底/扩展名）不在此——由 media_probe + assemble 程序化补齐。
 
-# 槽位规则（中文名/英文名/年份/版本信息/豆瓣评分/视频参数/字幕/清理）电影与电视剧共享；
-# 仅「总原则/标准格式/示例」因电影=单文件、电视剧=文件夹三级结构而分开，提示词因此也分开。
+# 文本槽位规则（中文名/英文名/年份/版本信息/豆瓣评分/片源/字幕）电影与电视剧共享
 _SLOT_RULES: list[dict[str, str]] = [
     {
         "topic": "中文名",
-        "content": "来源=原文件名或查询补充，必填。原文件名有中文名则提取；没有时取「## 知识库数据」给出的中文名；"
-        "两者都没有则该文件跳过并报错。副标题保持原样，不改标点。",
+        "content": "来源=原文件名或知识库，必填。原文件名有中文名则提取；没有时取「## 知识库数据」的中文名；"
+        "两者都没有则该文件跳过报错。",
     },
     {
         "topic": "英文名",
-        "content": "来源=原文件名或查询补充，必填。原文件名有英文名则提取；没有时取「## 知识库数据」给出的英文名；"
-        "两者都没有则该文件跳过并报错。空格改下划线 _；英文冒号（连其后空格）合并成一个中文冒号 ：；"
-        "连字符/破折号（- – —）连两侧空格合并成一个连字符 -，均不残留多余下划线"
-        "（Mission: Impossible - The Final Reckoning → Mission：Impossible-The_Final_Reckoning）。",
+        "content": "来源=原文件名或知识库，必填。原文件名有英文名则提取；没有时取「## 知识库数据」的英文名；"
+        "两者都没有则该文件跳过报错。空格改下划线 _；英文冒号（连其后空格）合并成一个中文冒号 ：；"
+        "连字符/破折号（- – —）连两侧空格合并成一个连字符 -。",
     },
     {
         "topic": "年份",
-        "content": "来源=原文件名或查询补充，必填，格式 .YYYY。原文件名有年份则用原年份；"
-        "没有时取「## 知识库数据」给出的年份；两者都没有则该文件跳过并报错。",
+        "content": "来源=原文件名或知识库，必填。原文件名有年份则用；没有时取「## 知识库数据」的年份；两者都没有则该文件跳过报错。",
     },
     {
         "topic": "版本信息",
-        "content": "来源=原文件名，可空。统一译为中文「XXX版」，同义词归一化（左→右）："
-        "EXTENDED/Extended.Cut/加长版→加长版；Director's.Cut/导演剪切版/导演剪辑版→导演剪辑版；"
-        "完整版→完整版；IMAX→IMAX版；剧场版→剧场版；重映版→重映版；特别版→特别版；"
-        "Unrated→未分级版；REMASTERED→重制版；v2→修正版；映射表之外一律删除。"
-        "多个版本信息并存时用顿号、分隔（如 加长版、重制版），不用点号。",
+        "content": "来源=原文件名，可空。统一译为中文「XXX版」：加长版/导演剪辑版/IMAX版/完整版/剧场版/重映版/"
+        "特别版/未分级版/重制版/修正版；映射表之外忽略。",
     },
     {
         "topic": "豆瓣评分",
-        "content": "来源=查询补充，可空，格式 「豆{一位小数}」（如「豆8.5」）。「## 知识库数据」给出评分才写，没给则跳过。",
+        "content": "来源=知识库，可空。取「## 知识库数据」评分的数字部分（如 8.5）；没有则留空。程序会加「豆」前缀。",
     },
     {
-        "topic": "视频参数",
-        "content": "来源=原文件名，可空。只保留已有参数：分辨率 1080p/2160p/720p/1920x800p；编码 x264/x265/H264/H265；"
-        "片源 BluRay/WEB-DL/BD/BDrip/ATVP；位深 10bit；杜比视界 DV；音频编码 .AAC.2AUDIO（2AUDIO=双音轨）。"
-        "粘合参数用 . 拆开并统一小写（BD1080P → BD.1080p）。字幕语种（CHS/ENG 等）不算视频参数。",
-    },
-    {
-        "topic": "删除参数",
-        "content": "删除发布组（BATWEB、CTRLHD、CMCT、SONYHD 等）与质量标记（HQ、HDMA、DDP5.1 等）。",
+        "topic": "片源",
+        "content": "来源=原文件名，可空。只取 BluRay/WEB-DL/BD/BDrip/ATVP/WEBRip；取不到留空。",
     },
     {
         "topic": "字幕",
-        "content": "来源=原文件名，必填。CHS=中文、ENG=英文；中文字幕/CHS → .中文字幕；"
-        "中英字幕/中英双字/CHS.ENG/CHS-ENG → .中英字幕；"
-        "特效中英字幕 → .特效中英字幕；修正特效中英字幕 → .修正特效中英字幕；没有任何字幕标记则写 .无字幕。",
-    },
-    {
-        "topic": "清理",
-        "content": "删除广告、网址、发布组等无关信息（如 梦幻天堂·龙网(www.321n.net)、[66影视www.66Ys.Co]、-BATWEB）。",
+        "content": "来源=原文件名，可空。CHS/中文字幕→中文字幕；中英字幕/中英双字/CHS.ENG→中英字幕；"
+        "特效中英字幕→特效中英字幕；修正特效中英字幕→修正特效中英字幕；取不到留空"
+        "（程序会读文件内封装字幕补 中文字幕/中英双字/其他字幕/无字幕）。",
     },
 ]
 
@@ -85,28 +66,27 @@ _SLOT_RULES: list[dict[str, str]] = [
 RULES: list[dict[str, str]] = [
     {
         "topic": "总原则",
-        "content": "只使用原文件名已有字段或「## 知识库数据」给出的字段，绝不臆造年份、评分、片名等任何信息。"
-        "「中文名/英文名/年份/字幕」四槽位必填：文件名与知识库数据都取不到时，该文件不写入映射，"
-        "改为在 _errors 中报告错误；其余槽位缺值则直接跳过。",
+        "content": "只使用原文件名已有字段或「## 知识库数据」给出的字段，绝不臆造。中文名/英文名/年份必填；"
+        "其余槽位缺值留空。分辨率/编码/位深/HDR/音频编码/声道/音轨数/字幕兜底/扩展名由程序读取媒体文件补齐，"
+        "本步骤不输出。",
     },
     {
         "topic": "标准格式",
-        "content": "输出文件名按固定槽位模板排列："
-        "[中文名].[英文名].[年份].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]。"
-        "中文名/英文名/年份/字幕必填，版本信息/豆瓣评分/视频参数缺值跳过。",
+        "content": "最终文件名由程序按下序拼装（本步骤只填文本槽位，不填技术槽位）："
+        "[中文名].[英文名].[年份][.版本信息][.豆瓣评分][.片源].[分辨率].[视频编码].[位深][.HDR]"
+        "[.音频编码].[声道][.音轨数][.字幕].扩展名",
     },
     *_SLOT_RULES,
     {
         "topic": "示例",
-        "content": "爱乐之城.2017.BD1080p.国英双语.中英双字.mp4（查询给英文名 La La Land）→ "
-        "爱乐之城.La_La_Land.2017.BD.1080p.中英字幕.mp4；"
-        "The.Pursuit.of.Happyness.2006.BluRay.1080p.LPCM5.1.x265.10bit-DreamHD.mkv（查询给中文名 当幸福来敲门）→ "
-        "当幸福来敲门.The_Pursuit_of_Happyness.2006.BluRay.1080p.x265.10bit.无字幕.mkv；"
-        "海上钢琴师(蓝光国英双音轨170分钟加长版).The.Legend.of.1900.Extended.Cut.1998.BD-1080p.X264.AAC.2AUDIO.CHS.ENG-UUMp4.mp4 → "
-        "海上钢琴师.The_Legend_of_1900.1998.加长版.BD-1080p.X264.AAC.2AUDIO.中英字幕.mp4；"
-        "利刃出鞘2.1080p.BD中英双字[66影视www.66Ys.Co].mp4（查询给英文名 Glass Onion、年份2022、评分「豆6.6」）→ "
-        "利刃出鞘2.Glass_Onion.2022.「豆6.6」.1080p.BD.中英字幕.mp4；"
-        "xxx.1080p.mkv（文件名与查询都给不出中文名/英文名/年份）→ 不写入映射，报错：缺中文名/英文名/年份。",
+        "content": "当幸福来敲门.The.Pursuit.of.Happyness.2006.BluRay.1080p.x265.10bit-DreamHD.mkv"
+        "（知识库：中文名 当幸福来敲门）→ "
+        "{\"当幸福来敲门.The.Pursuit.of.Happyness.2006.BluRay.1080p.x265.10bit-DreamHD.mkv\": "
+        "{\"zh\":\"当幸福来敲门\",\"en\":\"The_Pursuit_of_Happyness\",\"year\":\"2006\",\"edition\":\"\",\"score\":\"\",\"source\":\"BluRay\",\"sub\":\"\"}}；"
+        "利刃出鞘2.1080p.BD中英双字.mp4（知识库：英文名 Glass Onion、年份 2022、评分 6.6）→ "
+        "{\"利刃出鞘2.1080p.BD中英双字.mp4\": "
+        "{\"zh\":\"利刃出鞘2\",\"en\":\"Glass_Onion\",\"year\":\"2022\",\"edition\":\"\",\"score\":\"6.6\",\"source\":\"BD\",\"sub\":\"中英字幕\"}}；"
+        "xxx.1080p.mkv（文件名与知识库都给不出中文名/英文名/年份）→ 不写入，报错：缺中文名/英文名/年份。",
     },
 ]
 
@@ -115,63 +95,67 @@ RULES: list[dict[str, str]] = [
 TV_RULES: list[dict[str, str]] = [
     {
         "topic": "总原则",
-        "content": "只使用原集文件名已有字段或「## 知识库数据」给出的字段，绝不臆造年份、季集号、评分、片名等任何信息。"
-        "标准化对象是每个「系列文件夹」内的**集文件**：中文名/英文名/年份以「## 知识库数据」该系列文件夹为准"
-        "（必填），集文件的季号/集号/版本信息/视频参数从原集文件名提取；字幕信息优先从原集文件名提取，"
-        "集文件名无字幕标记时沿用该系列文件夹名里的字幕标记（如「[中文字幕]」→ .中文字幕）。",
+        "content": "只使用原集文件名已有字段或「## 知识库数据」给出的字段，绝不臆造。标准化对象是每个「系列文件夹」"
+        "内的集文件：中文名/英文名/年份以「## 知识库数据」该系列为准（必填）；季号/集号/副标题/版本信息/片源/字幕"
+        "从原集文件名提取。分辨率/编码/位深/HDR/音频编码/声道/音轨数/字幕兜底/扩展名由程序读取媒体文件补齐，本步骤不输出。",
     },
     {
         "topic": "标准格式",
-        "content": "电视剧目录三级结构（新相对路径用 / 分隔）："
-        "系列文件夹=[中文名].[英文名]；"
-        "季文件夹=S{两位季号}.[中文名].[英文名].[该季年份]（季号在最前，如 S01.DOTA：龙之血.DOTA：Dragon's_Blood.2021）；"
-        "集文件=[中文名].[英文名].S{两位季号}E{两位集号}[_副标题].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]（与电影模板一致，副标题可空，空时 [_副标题] 整体去掉、不留空点）。"
-        "输出 JSON：key 为原集文件相对路径，value 为上述三级结构的新相对路径。",
+        "content": "电视剧三级结构由程序按下序拼装（本步骤只填文本槽位）："
+        "系列文件夹=[中文名].[英文名]；季文件夹=S{两位季号}.[中文名].[英文名].[年份]；"
+        "集文件=[中文名].[英文名].S{两位季号}E{两位集号}[_副标题][.版本信息][.豆瓣评分][.片源]"
+        ".[分辨率].[视频编码].[位深][.HDR][.音频编码].[声道][.音轨数][.字幕].扩展名。",
     },
     {
         "topic": "季集号",
-        "content": "季号/集号从原集文件名提取：S01E02 → S01E02；第2集 → S01E02；E03/EP03 → S01E03；"
-        "02 → S01E02；完全取不到季集号则该集第1季、集号沿用数字序，仍取不到则跳过该集报错。"
-        "季号/集号统一两位零填充（S01、E02），不足两位前面补 0。"
-        "季文件夹年份取「## 知识库数据」该系列的逐季年份（「、」分隔，第X季取第X个；个数不足用最后一个补齐）。",
+        "content": "季号/集号从原集文件名提取：S01E02 → season=01、episode=02；第2集 → season=01、episode=02；"
+        "E03/EP03 → episode=03；02 → episode=02；完全取不到季集号则该集 season=01、episode 沿用数字序，"
+        "仍取不到则跳过报错。季号/集号统一两位零填充（01、02）。",
     },
     {
         "topic": "副标题",
-        "content": "来源=原集文件名或「## 知识库数据」，可空，位置紧接 S{季}E{集} 之后、用下划线 _ 连接（如 S01E02_Blood_Ties），不加 ◘。"
-        "原集文件名有副标题（如【Blood Ties】）则提取；「## 知识库数据」给了逐集副标题则以其为准"
-        "（有中文副标题优先用中文，否则用英文，其他语言不要）；两者都没有则跳过此槽位（不留下划线）。"
-        "英文副标题空格改下划线 _、冒号/连字符处理同英文名；中文副标题保持原样、不改标点。",
+        "content": "来源=原集文件名或「## 知识库数据」，可空。原集文件名有副标题（如【Blood Ties】）则提取；"
+        "「## 知识库数据」给了逐集副标题则以其为准（有中文优先用中文，否则用英文，其他语言不要）；"
+        "两者都没有则留空。英文副标题空格改下划线 _；中文副标题保持原样。",
     },
     *_SLOT_RULES,
     {
         "topic": "示例",
-        "content": "茶杯头大冒险/S01E02.1080p.mkv（查询：中文名 茶杯头大冒险、英文名 The Cuphead Show、逐季年份 2022、2022、2022）→ "
-        "茶杯头大冒险.The_Cuphead_Show/S01.茶杯头大冒险.The_Cuphead_Show.2022/茶杯头大冒险.The_Cuphead_Show.S01E02.1080p.无字幕.mkv；"
-        "越狱/Prison.Break.S01E01.mkv（查询：中文名 越狱、英文名 Prison Break、逐季年份 2005）→ "
-        "越狱.Prison_Break/S01.越狱.Prison_Break.2005/越狱.Prison_Break.S01E01.mkv；"
-        "企鹅人.The_Penguin/企鹅人.The_Penguin.【Blood Ties】.2024.S01E06.1080p.mkv"
-        "（查询：中文名 企鹅人、英文名 The Penguin、逐季年份 2024、逐集副标题 S01E06=Blood Ties）→ "
-        "企鹅人.The_Penguin/S01.企鹅人.The_Penguin.2024/企鹅人.The_Penguin.S01E06_Blood_Ties.1080p.无字幕.mkv；"
-        "xxx/abc.mkv（查询与文件名都给不出中文名/英文名）→ 不写入映射，报错：缺中文名/英文名。",
+        "content": "企鹅人.The_Penguin/企鹅人.The_Penguin.【Blood Ties】.2024.S01E06.1080p.mkv"
+        "（知识库：中文名 企鹅人、英文名 The Penguin、逐季年份 2024、逐集副标题 S01E06=Blood Ties）→ "
+        "{\"企鹅人.The_Penguin/企鹅人.The_Penguin.【Blood Ties】.2024.S01E06.1080p.mkv\": "
+        "{\"zh\":\"企鹅人\",\"en\":\"The_Penguin\",\"year\":\"2024\",\"season\":\"01\",\"episode\":\"06\",\"subtitle\":\"Blood_Ties\",\"edition\":\"\",\"score\":\"\",\"source\":\"\",\"sub\":\"\"}}；"
+        "茶杯头大冒险.The_Cuphead_Show/S01E02.1080p.mkv"
+        "（知识库：中文名 茶杯头大冒险、英文名 The Cuphead Show、逐季年份 2022）→ "
+        "{\"茶杯头大冒险.The_Cuphead_Show/S01E02.1080p.mkv\": "
+        "{\"zh\":\"茶杯头大冒险\",\"en\":\"The_Cuphead_Show\",\"year\":\"2022\",\"season\":\"01\",\"episode\":\"02\",\"subtitle\":\"\",\"edition\":\"\",\"score\":\"\",\"source\":\"\",\"sub\":\"\"}}；"
+        "xxx/abc.mkv（文件名与知识库都给不出中文名/英文名）→ 不写入，报错：缺中文名/英文名。",
     },
 ]
 
 _JSON_INSTRUCTION = (
     "\n\n## 输出要求\n"
-    "仅输出一个 JSON 字典：key 为原文件名，value 为标准化后的文件名；"
-    "必填槽位取不到、无法标准化的文件不要作为 key 写入映射，"
-    "改放入 \"_errors\" 键，值为数组，每项 {\"file\": 原文件名, \"reason\": 缺失说明}；"
+    "仅输出一个 JSON 字典：key 为原文件名，value 为槽位对象：\n"
+    "{\"原文件名\": {\"zh\": 中文名, \"en\": 英文名, \"year\": 年份, \"edition\": 版本信息, \"score\": 评分数字, \"source\": 片源, \"sub\": 字幕}}\n"
+    "zh/en/year 必填；edition/score/source/sub 取不到留空字符串 \"\"。\n"
+    "必填槽位取不到的文件不要作为 key，改放入 \"_errors\" 键，值为数组，每项 {\"file\": 原文件名, \"reason\": 缺失说明}。\n"
     "不要输出任何其他文字或解释。"
 )
 
 _TV_JSON_INSTRUCTION = (
     "\n\n## 输出要求\n"
-    "仅输出一个 JSON 字典：key 为原相对路径 = 【系列文件夹】名 + \"/\" + 集文件名；"
-    "集文件名按展示还原——有「公共前缀/公共后缀」的文件夹，集文件名 = 公共前缀 + 差异部分 + 公共后缀；"
-    "仅单个集文件的文件夹直接取展示名。"
-    "value 为标准化后的三级相对路径（系列文件夹/季文件夹/集文件，用 / 分隔）；"
-    "必填槽位取不到、无法标准化的集文件不要作为 key 写入映射，"
-    "改放入 \"_errors\" 键，值为数组，每项 {\"file\": 原相对路径, \"reason\": 缺失说明}；"
+    "仅输出一个 JSON 字典：key 为原相对路径（=【系列文件夹】名 + \"/\" + 集文件名，集文件名按展示还原），value 为槽位对象：\n"
+    "{\"原相对路径\": {\"zh\": 中文名, \"en\": 英文名, \"year\": 年份, \"season\": 季号两位, \"episode\": 集号两位, \"subtitle\": 副标题, \"edition\": 版本信息, \"score\": 评分数字, \"source\": 片源, \"sub\": 字幕}}\n"
+    "zh/en/year/season/episode 必填；subtitle/edition/score/source/sub 取不到留空字符串 \"\"。\n"
+    "必填槽位取不到的文件不要作为 key，改放入 \"_errors\" 键，值为数组，每项 {\"file\": 原相对路径, \"reason\": 缺失说明}。\n"
+    "不要输出任何其他文字或解释。"
+)
+
+_FIX_JSON_INSTRUCTION = (
+    "\n\n## 输出要求\n"
+    "仅输出一个 JSON 字典：key 为原文件名，value 为要修正的槽位对象（只含要改的字段，未改的字段省略）：\n"
+    "{\"原文件名\": {\"zh\": 中文名, \"en\": 英文名, \"year\": 年份, \"score\": 评分数字}}\n"
+    "只修正「中文名/英文名/年份/豆瓣评分」，其余槽位程序保留原值，不要输出。无需修正的文件不要作为 key。\n"
     "不要输出任何其他文字或解释。"
 )
 
@@ -246,10 +230,7 @@ def build_prompt(
     filenames: list[str], limit: int | None = None, infos: dict[str, dict] | None = None,
     is_tv: bool = False,
 ) -> str:
-    """检索相关规则 + 待标准化文件名（截断到 limit）+ 可选豆瓣信息（评分/年份）→ 组装提示词。
-
-    is_tv=True 用电视剧规则（文件夹三级结构），提示词与电影分开。
-    """
+    """检索相关规则 + 待标准化文件名（截断到 limit）+ 可选豆瓣信息（评分/年份）→ 组装提示词。"""
     kind = "tv" if is_tv else "movie"
     names = filenames[:limit] if limit else filenames
     context = "\n".join(f"- {d.page_content}" for d in _retrieve("\n".join(names), kind=kind))
@@ -318,8 +299,6 @@ def _tv_episode_blocks(episodes: list[str]) -> tuple[list[tuple[str, str]], list
         if p == 0 and s == 0:
             skipped.append(folder)
             continue
-        # 公共前后缀允许一侧为空（如 01.mp4…12.mp4 仅公共后缀 .mp4），
-        # 空侧不加点号，保证「公共前缀+差异部分+公共后缀」能原样还原集文件名。
         prefix = (".".join(toks[0][:p]) + ".") if p else ""
         suffix = ("." + ".".join(toks[0][-s:])) if s else ""
         middles = [".".join(t[p:len(t) - s]) for t in toks]
@@ -332,11 +311,7 @@ def _tv_episode_blocks(episodes: list[str]) -> tuple[list[tuple[str, str]], list
 
 
 def tv_summarizable(episodes: list[str]) -> tuple[list[str], list[str]]:
-    """判定每个系列能否总结，返回 (可总结系列名顺序, 无法总结被跳过的系列名)。
-
-    供调用方在查库前按「每次季数」limit 截断并对齐「知识库数据」：跳过的系列不占名额、
-    不写进提示词，避免「待标准化集文件」与「知识库数据」剧集对不上号。
-    """
+    """判定每个系列能否总结，返回 (可总结系列名顺序, 无法总结被跳过的系列名)。"""
     blocks, skipped = _tv_episode_blocks(episodes)
     return [f for f, _ in blocks], skipped
 
@@ -349,7 +324,7 @@ def _tv_episode_lines(episodes: list[str]) -> tuple[str, list[str]]:
 def build_tv_prompt(
     episodes: list[str], infos: dict[str, dict] | None = None,
 ) -> tuple[str, list[str]]:
-    """TV 集文件标准化提示词：输入 from 下每集相对路径，输出 {原相对路径: 新三级相对路径}。
+    """TV 集文件标准化提示词：输入 from 下每集相对路径，输出槽位对象。
 
     返回 (提示词文本, 无法总结被跳过的系列文件夹列表)；全部集文件都无法总结时提示词为空串。
     """
@@ -379,25 +354,25 @@ def build_fix_prompt(
     return (
         f"你是{role}{unit}修正助手。以下{unit}已完成标准化，请仅检查并修正"
         "「中文名 / 英文名 / 年份 / 豆瓣评分」四个可查询补充槽位：依据「## 知识库数据」改正错误、"
-        f"补上漏查（知识库数据有而{unit}缺的字段）；其余槽位（版本信息、视频参数、字幕信息等）一字不改；"
-        f"无需修正的{unit}保持原名。\n\n"
+        f"补上漏查（知识库数据有而{unit}缺的字段）；其余槽位（版本信息、片源、技术槽位、字幕等）一字不改；"
+        f"无需修正的{unit}保持原名（不输出）。\n\n"
         f"## 槽位规范\n{context}\n\n"
-        f"## 待检查{unit}\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
+        f"## 待检查{unit}\n{lines}{_info_section(names, infos)}{_FIX_JSON_INSTRUCTION}"
     )
 
 
-def call_deepseek(api_key: str, prompt: str) -> tuple[dict[str, str], list[dict]]:
-    """以 ChatDeepSeek 生成映射，返回 ({原文件名: 新文件名}, [必填缺失被跳过的条目])。"""
+def call_deepseek(api_key: str, prompt: str) -> tuple[dict, list[dict]]:
+    """以 ChatDeepSeek 生成槽位映射，返回 ({原文件名: 槽位 dict}, [必填缺失被跳过的条目])。"""
     llm = ChatDeepSeek(model=DEEPSEEK_MODEL, api_key=api_key, temperature=0)
     content = llm.invoke(prompt).content
     return _parse_result(content)
 
 
-def _parse_result(content: str) -> tuple[dict[str, str], list[dict]]:
-    """从返回文本提取 {原文件名:新文件名} 与 _errors 错误列表（容忍 ```json 代码块包裹）。
+def _parse_result(content: str) -> tuple[dict, list[dict]]:
+    """从返回文本提取 {原文件名:槽位 dict} 与 _errors 错误列表（容忍 ```json 代码块包裹）。
 
     设计理由：必填槽位取不到的文件不写入映射，模型改放在 _errors 键下，此处拆开返回，
-    避免 _errors 被误当成一条映射去重命名。
+    避免 _errors 被误当成一条映射。value 非 dict（旧格式全名）一律丢弃。
     """
     text = (content or "").strip()
     if text.startswith("```"):
@@ -413,7 +388,7 @@ def _parse_result(content: str) -> tuple[dict[str, str], list[dict]]:
     errors = data.pop("_errors", None)
     if not isinstance(errors, list):
         errors = []
-    return {str(k): str(v) for k, v in data.items()}, errors
+    return {str(k): (v if isinstance(v, dict) else {}) for k, v in data.items()}, errors
 
 
 _EXTRACT_INSTRUCTION = (
