@@ -144,7 +144,7 @@ def _build_mapping_naming(handler, config_mgr, profile, db):
     ui.label("命名规则 (Naming Rules):").classes("text-xs text-slate-500 font-mono mb-1")
     ui.textarea(value=rules_str).classes(
         "w-full bg-slate-700 text-cyan-100 font-mono text-sm"
-    ).style("min-height: 100px;").on_value_change(
+    ).style("min-height: 200px;").on_value_change(
         lambda e: _save_rules(config_mgr, profile, e.value),
     )
 
@@ -201,7 +201,7 @@ def _build_ai_naming(config_mgr, profile, handler, db):
         ).classes("text-xs text-slate-600 font-mono")
     prompt_area = ui.textarea(value=cfg.get("ai_prompt", "")).classes(
         "w-full bg-slate-700 text-cyan-100 font-mono text-sm"
-    ).style("min-height: 100px;").on_value_change(
+    ).props('input-style="min-height:200px"').on_value_change(
         lambda e: config_mgr.update_profile_config(
             profile, "ai_prompt", e.value or "",
         ),
@@ -232,7 +232,7 @@ def _build_ai_fix(config_mgr, profile, handler, db):
         ).classes("text-xs text-slate-600 font-mono")
     prompt_area = ui.textarea(value=cfg.get("ai_prompt", "")).classes(
         "w-full bg-slate-700 text-cyan-100 font-mono text-sm"
-    ).style("min-height: 100px;").on_value_change(
+    ).props('input-style="min-height:200px"').on_value_change(
         lambda e: config_mgr.update_profile_config(profile, "ai_prompt", e.value or ""),
     )
 
@@ -280,7 +280,7 @@ async def _gen_prompt(config_mgr, profile, db, prompt_area):
         for folder in files:
             vfs = await asyncio.to_thread(scan_videos, folder)
             if not vfs:
-                continue  # 已处理完/空文件夹：不占「每次季数」名额，也不进「查询结果」
+                continue  # 已处理完/空文件夹：不占「每次季数」名额，也不进「知识库数据」
             series[folder.name] = folder
             for vf in vfs:
                 # 保留系列文件夹内的相对子路径（可能已有季子目录），否则 vf.name

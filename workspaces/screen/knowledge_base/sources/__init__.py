@@ -115,6 +115,7 @@ def _persist(info: dict, query: str, raw: dict | None, profile: str) -> dict:
         zh, en, info.get("year", ""),
         info.get("score", ""), query, raw, profile=profile,
         seasons=info.get("seasons", ""), finished=info.get("finished", ""),
+        episodes=info.get("episodes"), subtitle_status=info.get("subtitle_status", ""),
     )
     return info
 

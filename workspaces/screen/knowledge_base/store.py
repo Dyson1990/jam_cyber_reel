@@ -52,12 +52,17 @@ def _norm_key(s: str) -> str:
 
 def _to_info(m: dict) -> dict | None:
     """metadata → 统一返回体 {zh,en,year,score,seasons,finished,raw?}，无任何字段返回 None。"""
-    out = {k: m[k] for k in ("zh", "en", "year", "score", "seasons", "finished") if m.get(k)}
+    out = {k: m[k] for k in ("zh", "en", "year", "score", "seasons", "finished", "subtitle_status") if m.get(k)}
     if not out:
         return None
     if m.get("raw"):
         try:
             out["raw"] = json.loads(m["raw"])
+        except (TypeError, ValueError):
+            pass
+    if m.get("episodes"):
+        try:
+            out["episodes"] = json.loads(m["episodes"])
         except (TypeError, ValueError):
             pass
     return out
@@ -108,16 +113,21 @@ def kb_lookup(query: str, profile: str = "movie") -> dict | None:
     return _to_info(best) if best else None
 
 
-def kb_upsert(zh: str, en: str, year: str, score: str, title: str, raw: dict | None = None, profile: str = "movie", seasons: str = "", finished: str = "") -> None:
+def kb_upsert(zh: str, en: str, year: str, score: str, title: str, raw: dict | None = None, profile: str = "movie", seasons: str = "", finished: str = "", episodes: dict | None = None, subtitle_status: str = "") -> None:
     """写入一条映射；raw 为各源一手数据全量（无删减 JSON），以 中文名>英文名>title 派生稳定 id 幂等覆盖。"""
     meta = {}
-    for k, v in (("zh", zh), ("en", en), ("year", year), ("score", score), ("title", title), ("seasons", seasons), ("finished", finished)):
+    for k, v in (("zh", zh), ("en", en), ("year", year), ("score", score), ("title", title), ("seasons", seasons), ("finished", finished), ("subtitle_status", subtitle_status)):
         v = _norm(v)
         if v:
             meta[k] = v
     if raw:
         try:
             meta["raw"] = json.dumps(raw, ensure_ascii=False)
+        except (TypeError, ValueError):
+            pass
+    if episodes:
+        try:
+            meta["episodes"] = json.dumps(episodes, ensure_ascii=False)
         except (TypeError, ValueError):
             pass
     if not meta:
@@ -144,11 +154,16 @@ def kb_list(profile: str = "movie") -> list[dict]:
         return out
     for i, mid in enumerate(res["ids"]):
         m = res["metadatas"][i]
-        row = {k: m.get(k, "") for k in ("zh", "en", "year", "score", "seasons", "finished", "title")}
+        row = {k: m.get(k, "") for k in ("zh", "en", "year", "score", "seasons", "finished", "subtitle_status", "title")}
         row["_id"] = mid  # 编辑时按稳定 id 定位，避免改中文名导致 id 漂移
         if m.get("raw"):
             try:
                 row["raw"] = json.loads(m["raw"])
+            except (TypeError, ValueError):
+                pass
+        if m.get("episodes"):
+            try:
+                row["episodes"] = json.loads(m["episodes"])
             except (TypeError, ValueError):
                 pass
         out.append(row)

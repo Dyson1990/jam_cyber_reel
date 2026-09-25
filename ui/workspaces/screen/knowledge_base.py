@@ -27,8 +27,11 @@ log, clear_log = make_page_logger("kb")
 logger = get_logger(__name__)
 
 
-def _save_row(cid, title, raw, zh_i, en_i, year_i, score_i, seasons_i, finished_i, profile):
-    """编辑保存：按稳定 id 删旧写新，避免改中英文名导致 id 漂移产生孤儿条目。"""
+def _save_row(cid, title, raw, zh_i, en_i, year_i, score_i, seasons_i, finished_i, profile, episodes=None, subtitle_status=""):
+    """编辑保存：按稳定 id 删旧写新，避免改中英文名导致 id 漂移产生孤儿条目。
+
+    episodes/subtitle_status 为派生的副标题信息，编辑其余字段时原样带回，避免被清空。
+    """
     zh = (zh_i.value or "").strip()
     en = (en_i.value or "").strip()
     if not zh and not en:
@@ -38,7 +41,8 @@ def _save_row(cid, title, raw, zh_i, en_i, year_i, score_i, seasons_i, finished_
     kb_upsert(zh, en, (year_i.value or "").strip(), (score_i.value or "").strip(),
               title, raw, profile=profile,
               seasons=(seasons_i.value or "").strip() if seasons_i else "",
-              finished=(finished_i.value or "").strip() if finished_i else "")
+              finished=(finished_i.value or "").strip() if finished_i else "",
+              episodes=episodes, subtitle_status=subtitle_status)
     log(f"  ✓ 已修改: {zh or en}", "green")
     kb_table.refresh(profile)
 
@@ -60,7 +64,7 @@ def kb_table(profile):
     headers = [("中文名", "flex-1"), ("英文名", "flex-1"),
                ("年份", "flex-1"), ("豆瓣评分", "flex-1")]
     if profile == "tv":
-        headers += [("季数", "w-16"), ("完结", "w-20")]
+        headers += [("季数", "w-16"), ("完结", "w-20"), ("副标题", "w-16")]
     with ui.row().classes("w-full gap-1 items-center mb-1"):
         for label, w in headers:
             ui.label(label).classes(f"{w} min-w-0 text-xs text-slate-500 font-mono")
@@ -69,6 +73,8 @@ def kb_table(profile):
         cid = e["_id"]
         title = e.get("title", "")
         raw = e.get("raw") or {}
+        episodes = e.get("episodes")
+        subtitle_status = e.get("subtitle_status", "")
         with ui.row().classes("w-full gap-1 items-center mb-1"):
             zh_i = ui.input(value=e.get("zh", "")).classes(
                 "flex-1 min-w-0 font-mono text-xs").props("outlined dense dark")
@@ -84,13 +90,17 @@ def kb_table(profile):
                     "w-16 font-mono text-xs").props("outlined dense dark")
                 finished_i = ui.input(value=e.get("finished", "")).classes(
                     "w-20 font-mono text-xs").props("outlined dense dark")
+                # 副标题有无为派生展示（由 episodes 判定），不可手改，用只读 label
+                ui.label(subtitle_status or "无").classes(
+                    "w-16 font-mono text-xs text-slate-300")
             # 默认参数逐个绑定循环变量，避免闭包晚绑定导致所有行按钮都作用于最后一行
             with ui.row().classes("gap-0 items-center w-16"):
                 ui.button("✔", on_click=lambda cid=cid, title=title, raw=raw,
                           zh_i=zh_i, en_i=en_i, year_i=year_i, score_i=score_i,
-                          seasons_i=seasons_i, finished_i=finished_i, profile=profile:
+                          seasons_i=seasons_i, finished_i=finished_i, profile=profile,
+                          episodes=episodes, subtitle_status=subtitle_status:
                           _save_row(cid, title, raw, zh_i, en_i, year_i, score_i,
-                                    seasons_i, finished_i, profile)).props(
+                                    seasons_i, finished_i, profile, episodes, subtitle_status)).props(
                     "dense flat color=cyan").classes("w-8")
                 ui.button("✕", on_click=lambda cid=cid,
                           name=(e.get("zh") or e.get("en")), profile=profile:
@@ -368,6 +378,7 @@ async def _run_douban_fix(profile):
             r.get("title", ""), raw, profile=profile,
             seasons=info.get("seasons") or r.get("seasons", ""),
             finished=info.get("finished") or r.get("finished", ""),
+            episodes=r.get("episodes"), subtitle_status=r.get("subtitle_status", ""),
         )
         fixed += 1
         log(f"  ✓ {q} → 评分[{info.get('score') or '-'}]/年份[{info.get('year') or '-'}]", "green")

@@ -6,6 +6,7 @@ search/movie 用 language=zh-CN 取中文名(title) + 原片名(original_title) 
 
 import json
 import logging
+import re
 import subprocess
 import urllib.parse
 import urllib.request
@@ -16,10 +17,14 @@ TMDB_SEARCH_URL = "https://api.themoviedb.org/3/search/movie"
 TMDB_MOVIE_URL = "https://api.themoviedb.org/3/movie/{mid}"
 TMDB_TV_SEARCH_URL = "https://api.themoviedb.org/3/search/tv"
 TMDB_TV_URL = "https://api.themoviedb.org/3/tv/{tid}"
+TMDB_TV_SEASON_URL = "https://api.themoviedb.org/3/tv/{tid}/season/{season}"
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36"
 
 # status=Ended/Canceled 表示不再更新（完结）；Returning/In Production 等仍在连载
 _FINISHED_STATUS = frozenset({"Ended", "Canceled"})
+
+# 集无独立副标题时的占位名（Episode N / 第 N 集 等），不算副标题
+_PLACEHOLDER_RE = re.compile(r"^(?:episode\s*#?\s*\d+|第\s*\d+\s*[集话回]|#\s*\d+)$", re.IGNORECASE)
 
 
 def _http_json(url: str, timeout: float = 8.0):
@@ -102,6 +107,63 @@ def fetch_tmdb(query: str, api_key: str) -> dict | None:
     return info or None
 
 
+def _tv_episode_subtitles(tid, api_key: str, det: dict) -> tuple[dict[str, str], int]:
+    """逐集副标题：对每季取 zh-CN/en-US 两版 season 端点，返回 (副标题映射, 总集数)。
+
+    键=「S{季两位}E{集两位}」与命名槽位对齐；只请求 zh-CN/en-US 两种语言，天然排除其它语言；
+    副标题语言按国家定（华语 CN/HK/TW 中文优先、否则英文优先）；占位名（Episode N / 第 N 集）不算副标题，
+    用于区分「有/无/部分」。
+    """
+    if not isinstance(det, dict):
+        return {}, 0
+    # 华语剧（大陆 CN/香港 HK/台湾 TW）原副标题是中文、英文是译名，中文优先；
+    # 其它国家（美/英/日韩等）原副标题是英文，英文优先。origin_country 为 ISO-3166 码数组。
+    cn_first = bool({"CN", "HK", "TW"} & set(det.get("origin_country") or []))
+    out: dict[str, str] = {}
+    total = 0
+    for s in det.get("seasons") or []:
+        if not isinstance(s, dict) or not s.get("season_number"):
+            continue  # 跳过 season 0（特辑/花絮）
+        try:
+            n = int(s["season_number"])
+        except (TypeError, ValueError):
+            continue
+        zh_eps: dict[int, str] = {}
+        en_eps: dict[int, str] = {}
+        for lang in ("zh-CN", "en-US"):
+            try:
+                url = f"{TMDB_TV_SEASON_URL.format(tid=tid, season=n)}?" + urllib.parse.urlencode(
+                    {"api_key": api_key, "language": lang},
+                )
+                data = _http_json(url)
+            except Exception:
+                data = None
+            epmap = {
+                int(e["episode_number"]): (e.get("name") or "").strip()
+                for e in (data or {}).get("episodes") or []
+                if isinstance(e, dict) and e.get("episode_number")
+            }
+            if lang == "zh-CN":
+                zh_eps = epmap
+            else:
+                en_eps = epmap
+        all_nums = sorted(set(zh_eps) | set(en_eps))
+        total += len(all_nums)
+        for epnum in all_nums:
+            zh = zh_eps.get(epnum, "")
+            en = en_eps.get(epnum, "")
+            # 真实副标题：非占位名；中文须非拉丁，英文须拉丁
+            zh_ok = bool(zh) and not _is_latin(zh) and not _PLACEHOLDER_RE.match(zh)
+            en_ok = bool(en) and _is_latin(en) and not _PLACEHOLDER_RE.match(en)
+            if cn_first:
+                sub = zh if zh_ok else (en if en_ok else "")
+            else:
+                sub = en if en_ok else (zh if zh_ok else "")
+            if sub:
+                out[f"S{n:02d}E{epnum:02d}"] = sub
+    return out, total
+
+
 def fetch_tmdb_tv(query: str, api_key: str) -> dict | None:
     """剧名 → {zh, en, year, seasons, finished, raw}：search/tv + tv/{id}。
 
@@ -177,4 +239,12 @@ def fetch_tmdb_tv(query: str, api_key: str) -> dict | None:
             years.append(fa)
     if years:
         info["year"] = "、".join(years)
+    if r.get("id"):
+        eps, total = _tv_episode_subtitles(r["id"], api_key, det)
+        if eps:
+            info["episodes"] = eps
+        if total:
+            info["subtitle_status"] = (
+                "有" if len(eps) == total else "部分" if eps else "无"
+            )
     return info or None

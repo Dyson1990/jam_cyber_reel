@@ -31,12 +31,12 @@ logger = logging.getLogger(__name__)
 _SLOT_RULES: list[dict[str, str]] = [
     {
         "topic": "中文名",
-        "content": "来源=原文件名或查询补充，必填。原文件名有中文名则提取；没有时取「## 查询结果」给出的中文名；"
+        "content": "来源=原文件名或查询补充，必填。原文件名有中文名则提取；没有时取「## 知识库数据」给出的中文名；"
         "两者都没有则该文件跳过并报错。副标题保持原样，不改标点。",
     },
     {
         "topic": "英文名",
-        "content": "来源=原文件名或查询补充，必填。原文件名有英文名则提取；没有时取「## 查询结果」给出的英文名；"
+        "content": "来源=原文件名或查询补充，必填。原文件名有英文名则提取；没有时取「## 知识库数据」给出的英文名；"
         "两者都没有则该文件跳过并报错。空格改下划线 _；英文冒号（连其后空格）合并成一个中文冒号 ：；"
         "连字符/破折号（- – —）连两侧空格合并成一个连字符 -，均不残留多余下划线"
         "（Mission: Impossible - The Final Reckoning → Mission：Impossible-The_Final_Reckoning）。",
@@ -44,7 +44,7 @@ _SLOT_RULES: list[dict[str, str]] = [
     {
         "topic": "年份",
         "content": "来源=原文件名或查询补充，必填，格式 .YYYY。原文件名有年份则用原年份；"
-        "没有时取「## 查询结果」给出的年份；两者都没有则该文件跳过并报错。",
+        "没有时取「## 知识库数据」给出的年份；两者都没有则该文件跳过并报错。",
     },
     {
         "topic": "版本信息",
@@ -56,7 +56,7 @@ _SLOT_RULES: list[dict[str, str]] = [
     },
     {
         "topic": "豆瓣评分",
-        "content": "来源=查询补充，可空，格式 「豆{一位小数}」（如「豆8.5」）。「## 查询结果」给出评分才写，没给则跳过。",
+        "content": "来源=查询补充，可空，格式 「豆{一位小数}」（如「豆8.5」）。「## 知识库数据」给出评分才写，没给则跳过。",
     },
     {
         "topic": "视频参数",
@@ -85,8 +85,8 @@ _SLOT_RULES: list[dict[str, str]] = [
 RULES: list[dict[str, str]] = [
     {
         "topic": "总原则",
-        "content": "只使用原文件名已有字段或「## 查询结果」给出的字段，绝不臆造年份、评分、片名等任何信息。"
-        "「中文名/英文名/年份/字幕」四槽位必填：文件名与查询结果都取不到时，该文件不写入映射，"
+        "content": "只使用原文件名已有字段或「## 知识库数据」给出的字段，绝不臆造年份、评分、片名等任何信息。"
+        "「中文名/英文名/年份/字幕」四槽位必填：文件名与知识库数据都取不到时，该文件不写入映射，"
         "改为在 _errors 中报告错误；其余槽位缺值则直接跳过。",
     },
     {
@@ -115,8 +115,8 @@ RULES: list[dict[str, str]] = [
 TV_RULES: list[dict[str, str]] = [
     {
         "topic": "总原则",
-        "content": "只使用原集文件名已有字段或「## 查询结果」给出的字段，绝不臆造年份、季集号、评分、片名等任何信息。"
-        "标准化对象是每个「系列文件夹」内的**集文件**：中文名/英文名/年份以「## 查询结果」该系列文件夹为准"
+        "content": "只使用原集文件名已有字段或「## 知识库数据」给出的字段，绝不臆造年份、季集号、评分、片名等任何信息。"
+        "标准化对象是每个「系列文件夹」内的**集文件**：中文名/英文名/年份以「## 知识库数据」该系列文件夹为准"
         "（必填），集文件的季号/集号/版本信息/视频参数从原集文件名提取；字幕信息优先从原集文件名提取，"
         "集文件名无字幕标记时沿用该系列文件夹名里的字幕标记（如「[中文字幕]」→ .中文字幕）。",
     },
@@ -125,7 +125,7 @@ TV_RULES: list[dict[str, str]] = [
         "content": "电视剧目录三级结构（新相对路径用 / 分隔）："
         "系列文件夹=[中文名].[英文名]；"
         "季文件夹=S{两位季号}.[中文名].[英文名].[该季年份]（季号在最前，如 S01.DOTA：龙之血.DOTA：Dragon's_Blood.2021）；"
-        "集文件=[中文名].[英文名].S{两位季号}E{两位集号}.[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]（与电影模板一致）。"
+        "集文件=[中文名].[英文名].S{两位季号}E{两位集号}[_副标题].[版本信息].[豆瓣评分].[视频参数].[字幕信息].[扩展名]（与电影模板一致，副标题可空，空时 [_副标题] 整体去掉、不留空点）。"
         "输出 JSON：key 为原集文件相对路径，value 为上述三级结构的新相对路径。",
     },
     {
@@ -133,7 +133,14 @@ TV_RULES: list[dict[str, str]] = [
         "content": "季号/集号从原集文件名提取：S01E02 → S01E02；第2集 → S01E02；E03/EP03 → S01E03；"
         "02 → S01E02；完全取不到季集号则该集第1季、集号沿用数字序，仍取不到则跳过该集报错。"
         "季号/集号统一两位零填充（S01、E02），不足两位前面补 0。"
-        "季文件夹年份取「## 查询结果」该系列的逐季年份（「、」分隔，第X季取第X个；个数不足用最后一个补齐）。",
+        "季文件夹年份取「## 知识库数据」该系列的逐季年份（「、」分隔，第X季取第X个；个数不足用最后一个补齐）。",
+    },
+    {
+        "topic": "副标题",
+        "content": "来源=原集文件名或「## 知识库数据」，可空，位置紧接 S{季}E{集} 之后、用下划线 _ 连接（如 S01E02_Blood_Ties），不加 ◘。"
+        "原集文件名有副标题（如【Blood Ties】）则提取；「## 知识库数据」给了逐集副标题则以其为准"
+        "（有中文副标题优先用中文，否则用英文，其他语言不要）；两者都没有则跳过此槽位（不留下划线）。"
+        "英文副标题空格改下划线 _、冒号/连字符处理同英文名；中文副标题保持原样、不改标点。",
     },
     *_SLOT_RULES,
     {
@@ -142,6 +149,9 @@ TV_RULES: list[dict[str, str]] = [
         "茶杯头大冒险.The_Cuphead_Show/S01.茶杯头大冒险.The_Cuphead_Show.2022/茶杯头大冒险.The_Cuphead_Show.S01E02.1080p.无字幕.mkv；"
         "越狱/Prison.Break.S01E01.mkv（查询：中文名 越狱、英文名 Prison Break、逐季年份 2005）→ "
         "越狱.Prison_Break/S01.越狱.Prison_Break.2005/越狱.Prison_Break.S01E01.mkv；"
+        "企鹅人.The_Penguin/企鹅人.The_Penguin.【Blood Ties】.2024.S01E06.1080p.mkv"
+        "（查询：中文名 企鹅人、英文名 The Penguin、逐季年份 2024、逐集副标题 S01E06=Blood Ties）→ "
+        "企鹅人.The_Penguin/S01.企鹅人.The_Penguin.2024/企鹅人.The_Penguin.S01E06_Blood_Ties.1080p.无字幕.mkv；"
         "xxx/abc.mkv（查询与文件名都给不出中文名/英文名）→ 不写入映射，报错：缺中文名/英文名。",
     },
 ]
@@ -212,7 +222,7 @@ def _retrieve(query: str, k: int = 20, kind: str = "movie") -> list[Document]:
 
 
 def _info_section(names: list[str], infos: dict[str, dict] | None) -> str:
-    """组装「## 查询结果」段落：条目号 + 中文名/英文名/年份/评分。"""
+    """组装「## 知识库数据」段落：条目号 + 中文名/英文名/年份/评分。"""
     if not infos:
         return ""
     rows = []
@@ -229,7 +239,7 @@ def _info_section(names: list[str], infos: dict[str, dict] | None) -> str:
             rows.append(f"- 第{i}条：{'，'.join(parts)}")
     if not rows:
         return ""
-    return "\n\n## 查询结果（条目号对应上方文件名序号）\n" + "\n".join(rows)
+    return "\n\n## 知识库数据（条目号对应上方文件名序号）\n" + "\n".join(rows)
 
 
 def build_prompt(
@@ -254,7 +264,7 @@ def build_prompt(
 
 
 def _tv_info_section(infos: dict[str, dict] | None) -> str:
-    """组装「## 查询结果」段落：按系列文件夹给出中文名/英文名/逐季年份/季数。"""
+    """组装「## 知识库数据」段落：按系列文件夹给出中文名/英文名/逐季年份/季数。"""
     if not infos:
         return ""
     rows = []
@@ -264,11 +274,14 @@ def _tv_info_section(infos: dict[str, dict] | None) -> str:
             for key, label in (("zh", "中文名"), ("en", "英文名"), ("year", "逐季年份"), ("seasons", "季数"))
             if info.get(key)
         ]
+        eps = info.get("episodes")
+        if isinstance(eps, dict) and eps:
+            parts.append("逐集副标题=" + "、".join(f"{k}={v}" for k, v in eps.items()))
         if parts:
             rows.append(f"- 「{folder}」：{'，'.join(parts)}")
     if not rows:
         return ""
-    return "\n\n## 查询结果（系列文件夹 → 各字段）\n" + "\n".join(rows)
+    return "\n\n## 知识库数据（系列文件夹 → 各字段）\n" + "\n".join(rows)
 
 
 def _tv_episode_blocks(episodes: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
@@ -321,8 +334,8 @@ def _tv_episode_blocks(episodes: list[str]) -> tuple[list[tuple[str, str]], list
 def tv_summarizable(episodes: list[str]) -> tuple[list[str], list[str]]:
     """判定每个系列能否总结，返回 (可总结系列名顺序, 无法总结被跳过的系列名)。
 
-    供调用方在查库前按「每次季数」limit 截断并对齐「查询结果」：跳过的系列不占名额、
-    不写进提示词，避免「待标准化集文件」与「查询结果」剧集对不上号。
+    供调用方在查库前按「每次季数」limit 截断并对齐「知识库数据」：跳过的系列不占名额、
+    不写进提示词，避免「待标准化集文件」与「知识库数据」剧集对不上号。
     """
     blocks, skipped = _tv_episode_blocks(episodes)
     return [f for f, _ in blocks], skipped
@@ -365,8 +378,8 @@ def build_fix_prompt(
     role = "电视剧" if is_tv else "电影"
     return (
         f"你是{role}{unit}修正助手。以下{unit}已完成标准化，请仅检查并修正"
-        "「中文名 / 英文名 / 年份 / 豆瓣评分」四个可查询补充槽位：依据「## 查询结果」改正错误、"
-        f"补上漏查（查询结果有而{unit}缺的字段）；其余槽位（版本信息、视频参数、字幕信息等）一字不改；"
+        "「中文名 / 英文名 / 年份 / 豆瓣评分」四个可查询补充槽位：依据「## 知识库数据」改正错误、"
+        f"补上漏查（知识库数据有而{unit}缺的字段）；其余槽位（版本信息、视频参数、字幕信息等）一字不改；"
         f"无需修正的{unit}保持原名。\n\n"
         f"## 槽位规范\n{context}\n\n"
         f"## 待检查{unit}\n{lines}{_info_section(names, infos)}{_JSON_INSTRUCTION}"
