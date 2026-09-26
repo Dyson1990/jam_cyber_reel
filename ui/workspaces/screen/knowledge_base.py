@@ -7,14 +7,16 @@
 """
 
 import asyncio
+import time
 import urllib.error
 from pathlib import Path
 
 from nicegui import ui
 
-from core.logging_config import get_logger
+from core.logging_config import get_log_dir, get_logger
 from workspaces.screen.overview import get_deepseek_key
-from workspaces.screen.knowledge_base import kb_list, kb_lookup, kb_upsert, kb_delete
+from workspaces.screen.knowledge_base import kb_list, kb_lookup, kb_upsert, kb_delete, kb_clear
+from workspaces.screen.knowledge_base.xlsx import read_xlsx, write_xlsx
 from ui.state import tag
 from ui.workspaces.screen._shared import (
     set_running, set_ready, set_error,
@@ -25,6 +27,71 @@ from ui.workspaces.screen._shared import (
 log, clear_log = make_page_logger("kb")
 
 logger = get_logger(__name__)
+
+_WEEK = 7 * 24 * 3600
+
+
+def _is_fresh(updated_at: str | None) -> bool:
+    """一周内更新过为 True；无时间戳（旧数据）按过期处理，需重查。"""
+    if not updated_at:
+        return False
+    try:
+        return (time.time() - float(updated_at)) < _WEEK
+    except (TypeError, ValueError):
+        return False
+
+
+_MISS_XLSX = "知识库待选_电视剧.xlsx"
+_SEL_MARK = {"1", "y", "yes", "是", "√", "选", "true", "x"}
+
+
+def _apply_manual_selection(profile) -> int:
+    """读人工选择 xlsx，把「选中」行写入知识库，返回写入条数并消费该表。"""
+    d = get_log_dir()
+    if d is None:
+        return 0
+    path = d / _MISS_XLSX
+    if not path.exists():
+        return 0
+    rows = read_xlsx(path)
+    path.unlink(missing_ok=True)  # 已消费，避免下次重复应用
+    if len(rows) < 2:
+        return 0
+    idx = {h.strip(): i for i, h in enumerate(rows[0])}
+    if not {"查询词", "中文名", "英文名", "年份", "季数", "是否完结", "选中"} <= set(idx):
+        return 0
+
+    def cell(r, name):
+        i = idx[name]
+        return (r[i] if i < len(r) else "").strip()
+
+    n = 0
+    for r in rows[1:]:
+        if cell(r, "选中").lower() not in _SEL_MARK:
+            continue
+        q, zh, en = cell(r, "查询词"), cell(r, "中文名"), cell(r, "英文名")
+        if not q or (not zh and not en):
+            continue
+        kb_upsert(zh, en, cell(r, "年份"), "", q, profile=profile,
+                  seasons=cell(r, "季数"), finished=cell(r, "是否完结"))
+        n += 1
+    return n
+
+
+def _write_miss_xlsx(misses) -> None:
+    """未过共识的候选写入待选 xlsx，供人工勾选。"""
+    if not misses:
+        return
+    d = get_log_dir()
+    if d is None:
+        return
+    header = ["查询词", "源", "中文名", "英文名", "年份", "季数", "是否完结", "选中"]
+    rows = [header]
+    for q, cands in misses:
+        for c in cands:
+            rows.append([q, c.get("src", ""), c.get("zh", ""), c.get("en", ""),
+                         c.get("year", ""), c.get("seasons", ""), c.get("finished", ""), ""])
+    write_xlsx(d / _MISS_XLSX, rows)
 
 
 def _save_row(cid, title, raw, zh_i, en_i, year_i, score_i, seasons_i, finished_i, profile, episodes=None, subtitle_status=""):
@@ -152,8 +219,12 @@ def build_kb(config_mgr, db, registry):
                         lambda: _run_update(config_mgr, profile, db),
                     )
                     run_button(
-                        "▶ 豆瓣修正", "green",
+                        "▶ 豆瓣修正", "cyan",
                         lambda: _run_douban_fix(profile),
+                    )
+                    run_button(
+                        "▶ 重做", "cyan",
+                        lambda: _run_redo(config_mgr, profile, db),
                     )
 
             with ui.card().classes("bg-slate-950 border border-cyan-800 rounded-lg p-6 w-full mb-6"):
@@ -205,17 +276,30 @@ def build_kb(config_mgr, db, registry):
         ui.notify("已写入知识库", type="positive")
 
 
+async def _run_redo(config_mgr, profile, db):
+    """清空当前 profile 知识库后重跑更新（电影/电视剧分库，只清当前集合，不误删另一类型）。"""
+    n = kb_clear(profile)
+    log(f"  已清空 {profile} 知识库 {n} 条", "yellow")
+    kb_table.refresh(profile)
+    await _run_update(config_mgr, profile, db)
+
+
 async def _run_update(config_mgr, profile, db):
     """更新知识库：取数据库 from/to/root 文件 → AI 提取中英名 → 去重后逐条走豆瓣外源自纠错固化。"""
     # 惰性导入：ai_naming 拖 LangChain、sources 拖 chromadb，只在真正更新时才加载
     from workspaces.screen.normalize import extract_names
     from workspaces.screen.knowledge_base.sources import (
-        fetch_info, reset_breakers, SEARCH_DELAY, extract_year, last_miss_reason,
+        fetch_info, reset_breakers, SEARCH_DELAY, extract_year, last_miss_reason, strip_season,
+        last_miss_cands,
     )
 
     clear_log()
     set_running("更新知识库")
     reset_breakers()
+    if profile == "tv":
+        n = _apply_manual_selection(profile)
+        if n:
+            log(f"  已按人工选择写入 {n} 条", "green")
 
     rows = [
         r for r in await asyncio.to_thread(db.get_media_by_profile, profile)
@@ -271,6 +355,7 @@ async def _run_update(config_mgr, profile, db):
                 db.set_media_names(profile, f["path"], zh, en)
 
     added = skipped = 0
+    misses: list[tuple[str, list[dict]]] = []  # tv 未过共识的候选，生成人工选择表
     seen_movie: set[str] = set()  # movie 同批去重（按片名）
     seen_tv: set[str] = set()     # tv 同批去重（数据源返回统一中英名，同名=同剧）
     for f in files:
@@ -278,6 +363,9 @@ async def _run_update(config_mgr, profile, db):
         zh = (f["zh"] or "").strip()
         en = (f["en"] or "").strip()
         q = zh or en
+        if profile == "tv":
+            # 文件夹名常带季号后缀（第四季/Season 4），剥离后再查，避免整季被当作独立剧入库
+            q = strip_season(q)
         if not q:
             log(f"  └ 跳过（未提取到片名）: {name}", "gray")
             skipped += 1
@@ -289,7 +377,10 @@ async def _run_update(config_mgr, profile, db):
             skipped += 1
             log(f"  ⚠ 同批重复片名跳过: {q}", "yellow")
             continue
-        if profile != "tv" and kb_lookup(q, profile=profile):
+        # 无论命中与否都占位：未命中的同名条目（系列夹+季合集包）不再重复查源、重复写待选表
+        seen.add(q)
+        cached = kb_lookup(q, profile=profile)
+        if cached and (profile != "tv" or _is_fresh(cached.get("updated_at"))):
             skipped += 1
             continue
         miss = ""
@@ -304,7 +395,6 @@ async def _run_update(config_mgr, profile, db):
                 miss = last_miss_reason()
         if info:
             added += 1
-            seen.add(q)
             extra = ""
             if profile == "tv":
                 extra = f"/季{info.get('seasons') or '-'}/{info.get('score') or '-'}/{info.get('finished') or '连载'}"
@@ -312,8 +402,15 @@ async def _run_update(config_mgr, profile, db):
         else:
             skipped += 1
             log(f"  └ 未命中数据源: {q}" + (f"（{miss}）" if miss else ""), "gray")
+            if profile == "tv":
+                cands = last_miss_cands()
+                if cands:
+                    misses.append((q, cands))
         await asyncio.sleep(SEARCH_DELAY)  # 限流，避免 apizero 429
 
+    if profile == "tv" and misses:
+        _write_miss_xlsx(misses)
+        log(f"  ✎ 未过共识 {len(misses)} 个已写入待选表，人工勾选后下次更新生效", "yellow")
     log(f"◆ 完成：新增 {added} 条，跳过 {skipped} 条", "cyan")
     kb_table.refresh(profile)
     set_ready()

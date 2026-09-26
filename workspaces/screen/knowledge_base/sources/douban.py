@@ -6,6 +6,8 @@ import time
 import urllib.parse
 import urllib.request
 
+from ._query import _SEASON_RE
+
 DOUBAN_SUGGEST_URL = "https://www.douban.com/j/search_suggest"
 DOUBAN_SUBJECT_SUGGEST_URL = "https://movie.douban.com/j/subject_suggest"
 APIZERO_MOVIE_URL = "https://v1.apizero.cn/api/douban-movie"
@@ -15,13 +17,6 @@ _UA = (
 )
 
 SEARCH_DELAY = 3.0  # apizero 匿名接口对连发请求会 429，请求间延时规避（电视剧多源连查，降速更稳妥）
-
-# 英文片名检索时的参数噪声词（命中即截断片名）
-_TITLE_STOP = frozenset({
-    "1080p", "2160p", "720p", "480p", "4k", "bluray", "web-dl", "webdl",
-    "bdrip", "x264", "x265", "h264", "h265", "10bit", "remux", "dvdrip",
-    "hdrip", "hevc", "avc", "dts", "dts-hd", "truehd", "atmos",
-})
 
 
 def _http_json(url: str, timeout: float = 8.0):
@@ -102,31 +97,6 @@ def _apizero_info(subject_id: str) -> dict:
     return info
 
 
-def title_query(filename: str) -> str:
-    """从原始文件名粗糙提取片名作搜索词（供各数据源检索，非精确）。"""
-    name = filename.rsplit(".", 1)[0] if "." in filename else filename
-    for cut in "([【":
-        name = name.split(cut, 1)[0]
-    name = name.replace(".", " ").replace("_", " ").strip()
-    tokens = name.split()
-    if not tokens:
-        return ""
-    if any("一" <= c <= "鿿" for c in tokens[0]):
-        return tokens[0]  # 首个 token 是中文 → 当作片名
-    out = []
-    for t in tokens:
-        if re.fullmatch(r"(19|20)\d{2}", t) or t.lower() in _TITLE_STOP:
-            break
-        out.append(t)
-    return " ".join(out)
-
-
-def extract_year(filename: str) -> str:
-    """从文件名提取 4 位年份（19xx/20xx），无则空串；用于同名多版消歧。"""
-    m = re.search(r"(?:19|20)\d{2}", filename)
-    return m.group(0) if m else ""
-
-
 def fetch_douban(query: str, year: str = "") -> dict | None:
     """纯豆瓣：片名 → {zh, en, score, year, raw}；无缓存，供上层包装知识库。"""
     sid, suggest_raw = _search_subject_id(query, year)
@@ -141,7 +111,6 @@ def fetch_douban(query: str, year: str = "") -> dict | None:
 
 
 _CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-_SEASON_RE = re.compile(r"第\s*([0-9]+|[一二三四五六七八九十]+)\s*季")
 
 
 def _season_num(title: str) -> int | None:
@@ -190,7 +159,7 @@ def fetch_douban_tv(query: str, year: str = "") -> dict | None:
         "zh": zh, "en": en,
         "year": "、".join(years) or (apz or {}).get("year", ""),
         "seasons": seasons,
-        "score": (apz or {}).get("score", ""),
+        "score": "",  # 豆瓣评分为逐季（每季独立条目），单取首季会与季数对不上，TV 不存
         "finished": finished,
         "raw": raw,
     }

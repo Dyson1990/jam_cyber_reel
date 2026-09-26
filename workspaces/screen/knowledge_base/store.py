@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from pathlib import Path
 
 import chromadb
@@ -52,7 +53,7 @@ def _norm_key(s: str) -> str:
 
 def _to_info(m: dict) -> dict | None:
     """metadata → 统一返回体 {zh,en,year,score,seasons,finished,raw?}，无任何字段返回 None。"""
-    out = {k: m[k] for k in ("zh", "en", "year", "score", "seasons", "finished", "subtitle_status") if m.get(k)}
+    out = {k: m[k] for k in ("zh", "en", "year", "score", "seasons", "finished", "subtitle_status", "updated_at") if m.get(k)}
     if not out:
         return None
     if m.get("raw"):
@@ -132,6 +133,7 @@ def kb_upsert(zh: str, en: str, year: str, score: str, title: str, raw: dict | N
             pass
     if not meta:
         return
+    meta["updated_at"] = str(int(time.time()))  # 每次写入刷新时间戳，供「一周内跳过」判断
     key = meta.get("zh") or meta.get("en") or meta.get("title") or ""
     cid = hashlib.md5(key.encode("utf-8")).hexdigest()
     try:
@@ -178,3 +180,24 @@ def kb_delete(cid: str, profile: str = "movie") -> None:
         _get_collection(profile).delete(ids=[cid])
     except Exception:
         logger.warning("知识库删除失败 %s", cid, exc_info=True)
+
+
+def kb_clear(profile: str = "movie") -> int:
+    """清空该 profile 集合的全部条目，返回清除条数。
+
+    按 profile 分集合（screen_kb / screen_kb_tv），只清当前集合，不影响另一类型。
+    """
+    col = _get_collection(profile)
+    try:
+        ids = (col.get() or {}).get("ids") or []
+    except Exception:
+        logger.warning("知识库读取失败（清空前）%s", profile, exc_info=True)
+        return 0
+    if not ids:
+        return 0
+    try:
+        col.delete(ids=ids)
+    except Exception:
+        logger.warning("知识库清空失败 %s", profile, exc_info=True)
+        return 0
+    return len(ids)

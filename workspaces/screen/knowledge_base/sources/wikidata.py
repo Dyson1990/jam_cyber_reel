@@ -18,8 +18,11 @@ def _http_json(url: str, timeout: float = 6.0):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _find_qid(query: str) -> tuple[str | None, dict | None]:
-    """标题 → (qid, 搜索原始 JSON)；一次取尽量多（limit 20）。"""
+def _find_qid(query: str, tv: bool = False) -> tuple[str | None, dict | None]:
+    """标题 → (qid, 搜索原始 JSON)；一次取尽量多（limit 20）。
+
+    tv=True 只认电视剧类条目（否则同名电影会污染剧库共识）；电影模式认影视类条目。
+    """
     params = urllib.parse.urlencode({
         "action": "wbsearchentities", "search": query, "language": "zh",
         "format": "json", "type": "item", "limit": 20,
@@ -30,14 +33,60 @@ def _find_qid(query: str) -> tuple[str | None, dict | None]:
         raise RuntimeError(f"Wikidata 搜索失败 {query}: {e}") from e
     for item in data.get("search", []):
         desc = (item.get("description") or "").lower()
-        if any(k in desc for k in ("film", "movie", "television", "电视")):
+        if tv:
+            if any(k in desc for k in ("television", "电视")):
+                return item.get("id"), data
+        elif any(k in desc for k in ("film", "movie", "television", "电视")):
             return item.get("id"), data
     return None, data
 
 
-def fetch_wikidata(query: str) -> dict | None:
+def _year_of(ent: dict) -> str:
+    """取实体首播年：P577（上映）优先，P580（剧集开始）兜底。"""
+    for prop in ("P577", "P580"):
+        for claim in (ent.get("claims") or {}).get(prop, []):
+            dv = (claim.get("mainsnak") or {}).get("datavalue") or {}
+            t = (dv.get("value") or {}).get("time")
+            if t and len(t) >= 5 and t[1:5].isdigit():
+                return t[1:5]
+    return ""
+
+
+def _is_tv_season(ent: dict) -> bool:
+    """P31（instance of）含 Q3464665（电视季）才算季条目，排除 P527 里混入的电影/特辑。"""
+    for claim in (ent.get("claims") or {}).get("P31", []):
+        dv = (claim.get("mainsnak") or {}).get("datavalue") or {}
+        if (dv.get("value") or {}).get("id") == "Q3464665":
+            return True
+    return False
+
+
+def _season_years(part_ids: list[str]) -> list[str]:
+    """跟随 P527「has part」季条目，一次取回全部实体，读每季首播年。"""
+    if not part_ids:
+        return []
+    url = f"{WD_API}?" + urllib.parse.urlencode({
+        "action": "wbgetentities", "ids": "|".join(part_ids),
+        "props": "claims", "format": "json",
+    })
+    try:
+        data = _http_json(url)
+    except Exception:
+        return []
+    years: list[str] = []
+    for pid in part_ids:
+        e = (data.get("entities") or {}).get(pid, {})
+        if not isinstance(e, dict) or not _is_tv_season(e):
+            continue
+        y = _year_of(e)
+        if y:
+            years.append(y)
+    return years
+
+
+def fetch_wikidata(query: str, tv: bool = False) -> dict | None:
     """片名 → {zh, en, year, seasons, raw}；raw 存实体 + 搜索原始 JSON 无删减。"""
-    qid, search_raw = _find_qid(query)
+    qid, search_raw = _find_qid(query, tv)
     if not qid:
         return None
     params = urllib.parse.urlencode({
@@ -59,12 +108,23 @@ def fetch_wikidata(query: str) -> dict | None:
         info["zh"] = labels["zh"]["value"]
     if labels.get("en", {}).get("value"):
         info["en"] = labels["en"]["value"]
-    for claim in (ent.get("claims") or {}).get("P577", []):
-        tv = (claim.get("mainsnak") or {}).get("datavalue") or {}
-        t = (tv.get("value") or {}).get("time")
-        if t and len(t) >= 5 and t[1:5].isdigit():
-            info["year"] = t[1:5]
-            break
+    # 首播年：电影 P577（上映）、剧集 P580（开始）；剧集再跟 P527 季条目取逐季年份
+    first_year = _year_of(ent)
+    if tv:
+        part_ids: list[str] = []
+        for claim in (ent.get("claims") or {}).get("P527", []):
+            dv = (claim.get("mainsnak") or {}).get("datavalue") or {}
+            pid = (dv.get("value") or {}).get("id")
+            if pid:
+                part_ids.append(pid)
+        years = _season_years(part_ids)
+        if years:
+            years.sort(key=int)
+            info["year"] = "、".join(years)
+        elif first_year:
+            info["year"] = first_year
+    elif first_year:
+        info["year"] = first_year
     for claim in (ent.get("claims") or {}).get("P2437", []):
         # P2437「季数」是 quantity，amount 形如 "+3"；去正负号取整数部分（截掉 .0）
         dv = (claim.get("mainsnak") or {}).get("datavalue") or {}

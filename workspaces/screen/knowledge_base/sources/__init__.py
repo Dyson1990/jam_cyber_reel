@@ -11,7 +11,8 @@ import logging
 import time
 
 from ..store import kb_lookup, kb_upsert
-from .douban import fetch_douban, fetch_douban_tv, title_query, SEARCH_DELAY, extract_year
+from ._query import title_query, strip_season, extract_year
+from .douban import fetch_douban, fetch_douban_tv, SEARCH_DELAY
 from .mtime import fetch_mtime
 from .tmdb import fetch_tmdb, fetch_tmdb_tv, _is_latin
 from .tvdb import fetch_tvdb
@@ -79,15 +80,28 @@ def _consensus_tv(cands: list[dict]) -> dict | None:
     for grp in groups.values():
         if len(grp) > len(full) / 2:
             return grp[0]
+    # 中英名逐条无过半 → 繁体/简体 zh 分歧（黑鏡 vs 黑镜）把同一剧拆成两拨；按英文名共识兜底
+    en_groups: dict[str, list[dict]] = {}
+    for c in full:
+        en_groups.setdefault(c["en"].strip().casefold(), []).append(c)
+    for grp in en_groups.values():
+        if len(grp) > len(full) / 2:
+            return grp[0]
     return None
 
 
 _last_miss: str = ""
+_last_cands: list[dict] = []
 
 
 def last_miss_reason() -> str:
     """返回最近一次 fetch_info 未命中原因（供 UI 日志展示），命中返回空串。"""
     return _last_miss
+
+
+def last_miss_cands() -> list[dict]:
+    """最近一次 TV 未过共识的各源候选（含 src），供 UI 生成人工选择表。"""
+    return _last_cands
 
 
 def _miss_reason(entries: list[tuple[str, dict | None]]) -> str:
@@ -172,22 +186,26 @@ def _fetch_tv(query: str, tmdb_key: str, tvdb_key: str, mode: str, year: str) ->
         if t_tv:
             if t_tv.get("raw"):
                 raw["tmdb"] = t_tv["raw"]
+            t_tv["src"] = "TMDB"
             cands.append(t_tv)
     if tvdb_key:
         v_tv = _call("tvdb", lambda: fetch_tvdb(query, tvdb_key))
         if v_tv:
             if v_tv.get("raw"):
                 raw["tvdb"] = v_tv["raw"]
+            v_tv["src"] = "TVDB"
             cands.append(v_tv)
-    w = _call("wikidata", lambda: fetch_wikidata(query))
+    w = _call("wikidata", lambda: fetch_wikidata(query, tv=True))
     if w:
         if w.get("raw"):
             raw["wikidata"] = w["raw"]
+        w["src"] = "维基"
         cands.append(w)
-    m = _call("mtime", lambda: fetch_mtime(query))
+    m = _call("mtime", lambda: fetch_mtime(query, tv=True))
     if m:
         if m.get("raw"):
             raw["mtime"] = m["raw"]
+        m["src"] = "时光"
         cands.append(m)
 
     # TMDB+TVDB 两个专业剧库中英文名一致即强信号直接采用：wikidata/时光网对剧集常返回
@@ -203,8 +221,9 @@ def _fetch_tv(query: str, tmdb_key: str, tvdb_key: str, mode: str, year: str) ->
     if not out:
         out = _consensus_tv(cands)
     if not out:
-        global _last_miss
+        global _last_miss, _last_cands
         _last_miss = _miss_reason([("TMDB", t_tv), ("TVDB", v_tv), ("维基", w), ("时光", m)])
+        _last_cands = cands
         return None
     return _persist(_align_tv_year(out, t_tv), query, raw, "tv")
 
