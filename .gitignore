@@ -17,6 +17,9 @@ Thumbs.db
 # Temp
 .claude/
 
+# 预览 GIF 临时帧（preview.gif 本身需入库供 README 引用）
+preview_frames/
+
 # 字幕下载产物（射手下载的 .ass/.srt）
 workspaces/screen/subtitle/subs/
 
